@@ -1,0 +1,358 @@
+<script lang="ts">
+  import { invoke } from '@tauri-apps/api/core';
+  import { open } from '@tauri-apps/plugin-dialog';
+  import { getSelectedPaths, addPaths, removePath } from '$lib/stores/app.svelte';
+  import { getRules } from '$lib/stores/rules.svelte';
+  import { setSortStatus, setStatusMessage, setCanUndo } from '$lib/stores/app.svelte';
+  import type { SortResult } from '$lib/types';
+
+  let dragOver = $state(false);
+
+  async function handleBrowse() {
+    try {
+      const selected = await open({
+        multiple: true,
+        directory: false,
+        title: 'Select files to sort'
+      });
+      if (selected) {
+        const paths = Array.isArray(selected) ? selected : [selected];
+        addPaths(paths);
+      }
+    } catch {
+      // user cancelled
+    }
+  }
+
+  async function handleBrowseFolder() {
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: true,
+        title: 'Select folder to sort'
+      });
+      if (selected) {
+        addPaths([selected]);
+      }
+    } catch {
+      // user cancelled
+    }
+  }
+
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault();
+    dragOver = true;
+  }
+
+  function handleDragLeave() {
+    dragOver = false;
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    dragOver = false;
+    if (e.dataTransfer?.files) {
+      const paths: string[] = [];
+      for (const file of e.dataTransfer.files) {
+        if ((file as any).path) {
+          paths.push((file as any).path);
+        }
+      }
+      if (paths.length > 0) {
+        addPaths(paths);
+      }
+    }
+  }
+
+  async function handleSort() {
+    const paths = getSelectedPaths();
+    const rules = getRules();
+
+    if (paths.length === 0) {
+      setStatusMessage('No files or folders selected');
+      return;
+    }
+    if (rules.length === 0) {
+      setStatusMessage('No rules defined');
+      return;
+    }
+    const validRules = rules.filter((r) => r.contains.trim() && r.target_folder.trim());
+    if (validRules.length === 0) {
+      setStatusMessage('Rules need both "Contains" and "Folder" fields');
+      return;
+    }
+
+    setSortStatus('sorting');
+    setStatusMessage('Sorting files...');
+
+    try {
+      const result = await invoke<SortResult>('sort_files', {
+        paths,
+        rules: validRules
+      });
+
+      if (result.errors.length > 0) {
+        setSortStatus('error');
+        setStatusMessage(`Done with ${result.errors.length} error(s). Moved ${result.operations.length} file(s).`);
+      } else {
+        setSortStatus('done');
+        setStatusMessage(`Moved ${result.operations.length} file(s) successfully.`);
+      }
+      setCanUndo(result.operations.length > 0);
+    } catch (err) {
+      setSortStatus('error');
+      setStatusMessage(`Error: ${err}`);
+    }
+  }
+
+  function shortenPath(p: string): string {
+    const parts = p.replace(/\\/g, '/').split('/');
+    if (parts.length <= 3) return parts.join('/');
+    return `.../${parts.slice(-2).join('/')}`;
+  }
+</script>
+
+<div class="drop-zone-panel">
+  <div class="drop-zone-header">
+    <h2>Files & Folders</h2>
+    <span class="path-count">{getSelectedPaths().length} selected</span>
+  </div>
+
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="drop-area"
+    class:drag-over={dragOver}
+    class:has-items={getSelectedPaths().length > 0}
+    ondragover={handleDragOver}
+    ondragleave={handleDragLeave}
+    ondrop={handleDrop}
+    onclick={getSelectedPaths().length === 0 ? handleBrowse : undefined}
+  >
+    {#if getSelectedPaths().length === 0}
+      <div class="drop-placeholder">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+          <rect x="4" y="8" width="32" height="26" rx="3" stroke="currentColor" stroke-width="2"/>
+          <path d="M4 14H36" stroke="currentColor" stroke-width="2"/>
+          <path d="M4 14L8 8H18L22 14" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        <p>Drop files or folders here</p>
+        <p class="hint">or click to browse</p>
+      </div>
+    {:else}
+      <div class="path-list">
+        {#each getSelectedPaths() as path}
+          <div class="path-item">
+            <span class="path-text" title={path}>{shortenPath(path)}</span>
+            <button class="remove-path" onclick={() => removePath(path)} title="Remove">
+              <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                <path d="M2 2L12 12M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
+
+  <div class="drop-zone-actions">
+    <div class="browse-buttons">
+      <button class="browse-btn" onclick={handleBrowse}>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M1 7H13M7 1V13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        Files
+      </button>
+      <button class="browse-btn" onclick={handleBrowseFolder}>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <rect x="1" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M1 5.5L1 3.5C1 2.67 1.67 2 2.5 2H5.5L7 4H11.5C12.33 4 13 4.67 13 5.5" stroke="currentColor" stroke-width="1.5"/>
+        </svg>
+        Folder
+      </button>
+    </div>
+    <button class="sort-btn" onclick={handleSort} disabled={getSelectedPaths().length === 0 || getRules().length === 0}>
+      Sort Now
+    </button>
+  </div>
+</div>
+
+<style>
+  .drop-zone-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    height: 100%;
+  }
+
+  .drop-zone-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 4px;
+  }
+
+  h2 {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    margin: 0;
+  }
+
+  .path-count {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .drop-area {
+    flex: 1;
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    overflow-y: auto;
+    min-height: 120px;
+  }
+
+  .drop-area:hover {
+    border-color: var(--accent);
+    background: var(--surface-2);
+  }
+
+  .drop-area.drag-over {
+    border-color: var(--accent);
+    background: rgba(99, 102, 241, 0.08);
+  }
+
+  .drop-area.has-items {
+    cursor: default;
+    align-items: flex-start;
+    padding: 8px;
+  }
+
+  .drop-placeholder {
+    text-align: center;
+    color: var(--text-muted);
+    user-select: none;
+  }
+
+  .drop-placeholder svg {
+    opacity: 0.4;
+    margin-bottom: 8px;
+  }
+
+  .drop-placeholder p {
+    margin: 2px 0;
+    font-size: 14px;
+  }
+
+  .drop-placeholder .hint {
+    font-size: 12px;
+    opacity: 0.6;
+  }
+
+  .path-list {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .path-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: var(--surface-2);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  .path-text {
+    font-size: 12px;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .remove-path {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    transition: color 0.15s;
+    flex-shrink: 0;
+    margin-left: 8px;
+  }
+
+  .remove-path:hover {
+    color: var(--danger);
+  }
+
+  .drop-zone-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .browse-buttons {
+    display: flex;
+    gap: 6px;
+  }
+
+  .browse-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+
+  .browse-btn:hover {
+    background: var(--surface-3);
+    border-color: var(--border-hover);
+  }
+
+  .sort-btn {
+    margin-left: auto;
+    padding: 8px 24px;
+    background: var(--accent);
+    border: none;
+    border-radius: 7px;
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+
+  .sort-btn:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  .sort-btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  .sort-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+</style>

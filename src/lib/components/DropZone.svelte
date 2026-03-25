@@ -1,12 +1,33 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { open } from '@tauri-apps/plugin-dialog';
+  import { onMount } from 'svelte';
   import { getSelectedPaths, addPaths, removePath } from '$lib/stores/app.svelte';
   import { getRules } from '$lib/stores/rules.svelte';
   import { setSortStatus, setStatusMessage, setCanUndo, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
   import type { SortResult } from '$lib/types';
 
   let dragOver = $state(false);
+
+  onMount(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type === 'over') {
+        dragOver = true;
+      } else if (event.payload.type === 'leave') {
+        dragOver = false;
+      } else if (event.payload.type === 'drop') {
+        dragOver = false;
+        if (event.payload.paths.length > 0) {
+          addPaths(event.payload.paths);
+        }
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  });
 
   async function handleBrowse() {
     try {
@@ -41,27 +62,14 @@
 
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
-    dragOver = true;
   }
 
-  function handleDragLeave() {
-    dragOver = false;
+  function handleDragLeave(e: DragEvent) {
+    e.preventDefault();
   }
 
   function handleDrop(e: DragEvent) {
     e.preventDefault();
-    dragOver = false;
-    if (e.dataTransfer?.files) {
-      const paths: string[] = [];
-      for (const file of e.dataTransfer.files) {
-        if ((file as any).path) {
-          paths.push((file as any).path);
-        }
-      }
-      if (paths.length > 0) {
-        addPaths(paths);
-      }
-    }
   }
 
   async function handleBrowseOutput() {

@@ -3,7 +3,7 @@
   import { open } from '@tauri-apps/plugin-dialog';
   import { getSelectedPaths, addPaths, removePath } from '$lib/stores/app.svelte';
   import { getRules } from '$lib/stores/rules.svelte';
-  import { setSortStatus, setStatusMessage, setCanUndo } from '$lib/stores/app.svelte';
+  import { setSortStatus, setStatusMessage, setCanUndo, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
   import type { SortResult } from '$lib/types';
 
   let dragOver = $state(false);
@@ -17,7 +17,7 @@
       });
       if (selected) {
         const paths = Array.isArray(selected) ? selected : [selected];
-        addPaths(paths);
+        await addPaths(paths);
       }
     } catch {
       // user cancelled
@@ -32,7 +32,7 @@
         title: 'Select folder to sort'
       });
       if (selected) {
-        addPaths([selected]);
+        await addPaths([selected]);
       }
     } catch {
       // user cancelled
@@ -64,9 +64,35 @@
     }
   }
 
+  async function handleBrowseOutput() {
+    try {
+      const selected = await open({
+        multiple: false,
+        directory: true,
+        title: 'Select output directory'
+      });
+      if (selected) {
+        setOutputDir(selected);
+      }
+    } catch {
+      // user cancelled
+    }
+  }
+
+  function getUniqueParentDirs(paths: string[]): Set<string> {
+    return new Set(
+      paths.map((p) => {
+        const normalized = p.replace(/\\/g, '/');
+        const lastSlash = normalized.lastIndexOf('/');
+        return lastSlash >= 0 ? normalized.substring(0, lastSlash) : normalized;
+      })
+    );
+  }
+
   async function handleSort() {
     const paths = getSelectedPaths();
     const rules = getRules();
+    const copyMode = getCopyMode();
 
     if (paths.length === 0) {
       setStatusMessage('No files or folders selected');
@@ -82,21 +108,31 @@
       return;
     }
 
+    const parentDirs = getUniqueParentDirs(paths);
+    if (parentDirs.size > 1 && !getOutputDir()) {
+      setStatusMessage('Output directory required when files come from multiple folders');
+      return;
+    }
+
     setSortStatus('sorting');
-    setStatusMessage('Sorting files...');
+    setStatusMessage(copyMode ? 'Copying files...' : 'Sorting files...');
+
+    const verb = copyMode ? 'Copied' : 'Moved';
 
     try {
       const result = await invoke<SortResult>('sort_files', {
         paths,
-        rules: validRules
+        rules: validRules,
+        outputDir: getOutputDir(),
+        copyMode
       });
 
       if (result.errors.length > 0) {
         setSortStatus('error');
-        setStatusMessage(`Done with ${result.errors.length} error(s). Moved ${result.operations.length} file(s).`);
+        setStatusMessage(`Done with ${result.errors.length} error(s). ${verb} ${result.operations.length} file(s).`);
       } else {
         setSortStatus('done');
-        setStatusMessage(`Moved ${result.operations.length} file(s) successfully.`);
+        setStatusMessage(`${verb} ${result.operations.length} file(s) successfully.`);
       }
       setCanUndo(result.operations.length > 0);
     } catch (err) {
@@ -155,6 +191,18 @@
     {/if}
   </div>
 
+  {#if getOutputDir()}
+    <div class="output-dir-bar">
+      <span class="output-label">Output:</span>
+      <span class="output-path" title={getOutputDir()}>{shortenPath(getOutputDir()!)}</span>
+      <button class="remove-path" onclick={() => setOutputDir(null)} title="Clear output directory">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+          <path d="M2 2L12 12M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+  {/if}
+
   <div class="drop-zone-actions">
     <div class="browse-buttons">
       <button class="browse-btn" onclick={handleBrowse}>
@@ -170,7 +218,18 @@
         </svg>
         Folder
       </button>
+      <button class="browse-btn" onclick={handleBrowseOutput} title="Set output directory">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M7 1V10M7 10L4 7M7 10L10 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M1 11V12.5C1 12.78 1.22 13 1.5 13H12.5C12.78 13 13 12.78 13 12.5V11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Output
+      </button>
     </div>
+    <label class="copy-toggle" title="Copy files instead of moving them">
+      <input type="checkbox" checked={getCopyMode()} onchange={(e) => setCopyMode(e.currentTarget.checked)} />
+      <span>Copy</span>
+    </label>
     <button class="sort-btn" onclick={handleSort} disabled={getSelectedPaths().length === 0 || getRules().length === 0}>
       Sort Now
     </button>
@@ -328,6 +387,50 @@
   .browse-btn:hover {
     background: var(--surface-3);
     border-color: var(--border-hover);
+  }
+
+  .output-dir-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+
+  .output-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+  }
+
+  .output-path {
+    font-size: 12px;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .copy-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .copy-toggle input[type="checkbox"] {
+    accent-color: var(--accent);
+    cursor: pointer;
   }
 
   .sort-btn {

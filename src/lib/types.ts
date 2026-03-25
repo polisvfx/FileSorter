@@ -8,6 +8,7 @@ export interface Rule {
 export interface FileOperation {
   original_path: string;
   new_path: string;
+  copied: boolean;
 }
 
 export interface SortResult {

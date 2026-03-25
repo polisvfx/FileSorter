@@ -1,8 +1,37 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import PresetBar from '$lib/components/PresetBar.svelte';
   import RuleList from '$lib/components/RuleList.svelte';
   import DropZone from '$lib/components/DropZone.svelte';
   import StatusBar from '$lib/components/StatusBar.svelte';
+  import { getSelectedPaths, setPaths, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
+  import { getRules, setRules } from '$lib/stores/rules.svelte';
+  import { loadSession, saveSession } from '$lib/stores/persistence';
+
+  let initialized = false;
+
+  onMount(() => {
+    const session = loadSession();
+    if (session) {
+      if (session.rules?.length) setRules(session.rules);
+      if (session.outputDir) setOutputDir(session.outputDir);
+      if (session.copyMode) setCopyMode(session.copyMode);
+      if (session.selectedPaths?.length) setPaths(session.selectedPaths);
+    }
+    initialized = true;
+  });
+
+  $effect(() => {
+    const state = {
+      rules: getRules(),
+      outputDir: getOutputDir(),
+      copyMode: getCopyMode(),
+      selectedPaths: getSelectedPaths()
+    };
+    if (initialized) {
+      saveSession(state);
+    }
+  });
 </script>
 
 <div class="app">

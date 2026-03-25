@@ -45,7 +45,15 @@ pub fn undo_last_sort(state: tauri::State<'_, UndoState>) -> Result<Vec<String>,
             }
         }
 
-        if let Err(e) = fs::rename(&op.new_path, &op.original_path) {
+        if op.copied {
+            if let Err(e) = fs::remove_file(&op.new_path) {
+                errors.push(format!(
+                    "Failed to delete copy '{}': {}",
+                    op.new_path.display(),
+                    e
+                ));
+            }
+        } else if let Err(e) = fs::rename(&op.new_path, &op.original_path) {
             errors.push(format!(
                 "Failed to restore '{}': {}",
                 op.new_path.display(),

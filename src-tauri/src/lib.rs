@@ -11,10 +11,13 @@ use std::path::PathBuf;
 fn sort_files(
     paths: Vec<String>,
     rules: Vec<Rule>,
+    output_dir: Option<String>,
+    copy_mode: bool,
     state: tauri::State<'_, UndoState>,
 ) -> Result<SortResult, String> {
     let root_paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-    let result = execute_sort(root_paths, &rules);
+    let out_path = output_dir.map(PathBuf::from);
+    let result = execute_sort(root_paths, &rules, out_path, copy_mode);
 
     // Store operations for undo
     let mut ops = state.operations.lock().map_err(|e| e.to_string())?;

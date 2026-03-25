@@ -33,24 +33,36 @@ pub fn undo_last_sort(state: tauri::State<'_, UndoState>) -> Result<Vec<String>,
             continue;
         }
 
-        // Ensure original parent directory exists
-        if let Some(parent) = op.original_path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
+        if op.copied {
+            // Undo a copy: just delete the copied file
+            if let Err(e) = fs::remove_file(&op.new_path) {
                 errors.push(format!(
-                    "Failed to create directory '{}': {}",
-                    parent.display(),
+                    "Failed to delete copied file '{}': {}",
+                    op.new_path.display(),
                     e
                 ));
-                continue;
             }
-        }
+        } else {
+            // Undo a move: move the file back
+            // Ensure original parent directory exists
+            if let Some(parent) = op.original_path.parent() {
+                if let Err(e) = fs::create_dir_all(parent) {
+                    errors.push(format!(
+                        "Failed to create directory '{}': {}",
+                        parent.display(),
+                        e
+                    ));
+                    continue;
+                }
+            }
 
-        if let Err(e) = fs::rename(&op.new_path, &op.original_path) {
-            errors.push(format!(
-                "Failed to restore '{}': {}",
-                op.new_path.display(),
-                e
-            ));
+            if let Err(e) = fs::rename(&op.new_path, &op.original_path) {
+                errors.push(format!(
+                    "Failed to restore '{}': {}",
+                    op.new_path.display(),
+                    e
+                ));
+            }
         }
     }
 

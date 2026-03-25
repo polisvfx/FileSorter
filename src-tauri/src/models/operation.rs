@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub struct FileOperation {
     pub original_path: PathBuf,
     pub new_path: PathBuf,
+    pub copied: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -2,6 +2,8 @@ let selectedPaths = $state<string[]>([]);
 let sortStatus = $state<'idle' | 'sorting' | 'done' | 'error'>('idle');
 let statusMessage = $state('');
 let canUndo = $state(false);
+let outputDir = $state<string | null>(null);
+let copyMode = $state(false);
 
 export function getSelectedPaths(): string[] {
   return selectedPaths;
@@ -46,4 +48,20 @@ export function getCanUndo() {
 
 export function setCanUndo(value: boolean) {
   canUndo = value;
+}
+
+export function getOutputDir(): string | null {
+  return outputDir;
+}
+
+export function setOutputDir(dir: string | null) {
+  outputDir = dir;
+}
+
+export function getCopyMode(): boolean {
+  return copyMode;
+}
+
+export function setCopyMode(value: boolean) {
+  copyMode = value;
 }

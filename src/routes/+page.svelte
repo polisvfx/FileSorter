@@ -8,7 +8,14 @@
   import { getRules, setRules } from '$lib/stores/rules.svelte';
   import { loadSession, saveSession } from '$lib/stores/persistence';
 
+  const LEFT_PANEL_DEFAULT = 480;
+  const LEFT_PANEL_MIN = 280;
+  const RIGHT_PANEL_MIN = 300;
+  const DIVIDER_KEY = 'filesorter-divider-width';
+
   let initialized = false;
+  let leftPanelWidth = $state(LEFT_PANEL_DEFAULT);
+  let isDragging = $state(false);
 
   onMount(() => {
     const session = loadSession();
@@ -18,6 +25,15 @@
       if (session.copyMode) setCopyMode(session.copyMode);
       if (session.selectedPaths?.length) setPaths(session.selectedPaths);
     }
+
+    const saved = localStorage.getItem(DIVIDER_KEY);
+    if (saved) {
+      const parsed = parseInt(saved, 10);
+      if (!isNaN(parsed) && parsed >= LEFT_PANEL_MIN) {
+        leftPanelWidth = parsed;
+      }
+    }
+
     initialized = true;
   });
 
@@ -32,19 +48,59 @@
       saveSession(state);
     }
   });
+
+  $effect(() => {
+    if (initialized) {
+      localStorage.setItem(DIVIDER_KEY, String(leftPanelWidth));
+    }
+  });
+
+  function onDividerMouseDown(e: MouseEvent) {
+    e.preventDefault();
+    isDragging = true;
+
+    const startX = e.clientX;
+    const startWidth = leftPanelWidth;
+
+    function onMouseMove(e: MouseEvent) {
+      const delta = e.clientX - startX;
+      const container = document.querySelector('.content') as HTMLElement;
+      const maxLeft = container.clientWidth - RIGHT_PANEL_MIN;
+      leftPanelWidth = Math.max(LEFT_PANEL_MIN, Math.min(maxLeft, startWidth + delta));
+    }
+
+    function onMouseUp() {
+      isDragging = false;
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    }
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }
 </script>
 
 <div class="app">
   <PresetBar />
 
   <main class="content">
-    <div class="panel left-panel">
+    <div class="panel left-panel" style="width: {leftPanelWidth}px">
       <RuleList />
     </div>
-    <div class="divider"></div>
+    <div
+      class="divider"
+      class:dragging={isDragging}
+      onmousedown={onDividerMouseDown}
+      role="separator"
+      tabindex="0"
+      aria-orientation="vertical"
+    ></div>
     <div class="panel right-panel">
       <DropZone />
     </div>
+    {#if isDragging}
+      <div class="drag-overlay"></div>
+    {/if}
   </main>
 
   <StatusBar />
@@ -71,7 +127,8 @@
   }
 
   .left-panel {
-    flex: 1.2;
+    min-width: 280px;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
   }
@@ -79,11 +136,40 @@
   .divider {
     width: 1px;
     background: var(--border);
+    cursor: col-resize;
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .divider::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -3px;
+    width: 7px;
+    z-index: 1;
+  }
+
+  .divider:hover,
+  .divider.dragging {
+    background: var(--accent);
   }
 
   .right-panel {
-    flex: 0.8;
+    flex: 1;
+    min-width: 300px;
     display: flex;
     flex-direction: column;
+  }
+
+  .drag-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    cursor: col-resize;
   }
 </style>

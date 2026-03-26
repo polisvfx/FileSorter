@@ -87,6 +87,7 @@
     <div class="panel left-panel" style="width: {leftPanelWidth}px">
       <RuleList />
     </div>
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <div
       class="divider"
       class:dragging={isDragging}

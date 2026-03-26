@@ -369,7 +369,7 @@
 
   .drop-area.drag-over {
     border-color: var(--accent);
-    background: rgba(99, 102, 241, 0.08);
+    background: rgba(102, 153, 204, 0.08);
   }
 
   .drop-area.has-items {
@@ -419,7 +419,7 @@
 
   .path-item.has-rules {
     border-left: 3px solid var(--accent);
-    background: rgba(99, 102, 241, 0.06);
+    background: rgba(102, 153, 204, 0.06);
   }
 
   .path-text {

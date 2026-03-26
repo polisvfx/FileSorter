@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core';
+
 let selectedPaths = $state<string[]>([]);
 let sortStatus = $state<'idle' | 'sorting' | 'done' | 'error'>('idle');
 let statusMessage = $state('');
@@ -9,13 +11,18 @@ export function getSelectedPaths(): string[] {
   return selectedPaths;
 }
 
-export function addPaths(paths: string[]) {
+export async function addPaths(paths: string[]) {
+  const resolved = await invoke<string[]>('resolve_paths', { paths });
   const existing = new Set(selectedPaths);
-  for (const p of paths) {
+  for (const p of resolved) {
     if (!existing.has(p)) {
       selectedPaths.push(p);
     }
   }
+}
+
+export function setPaths(paths: string[]) {
+  selectedPaths = paths;
 }
 
 export function removePath(path: string) {

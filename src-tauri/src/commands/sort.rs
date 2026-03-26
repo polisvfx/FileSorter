@@ -32,7 +32,7 @@ fn resolve_conflict(target: &Path) -> PathBuf {
 }
 
 /// Collect all file paths under the given roots.
-fn collect_files(roots: &[PathBuf]) -> Vec<PathBuf> {
+pub(crate) fn collect_files(roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for root in roots {
         if root.is_file() {

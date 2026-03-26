@@ -2,6 +2,7 @@ mod commands;
 mod models;
 
 use commands::presets;
+use commands::resolve;
 use commands::sort::execute_sort;
 use commands::undo::{self, UndoState};
 use models::{Rule, SortResult};
@@ -34,6 +35,7 @@ pub fn run() {
         .manage(UndoState::new())
         .invoke_handler(tauri::generate_handler![
             sort_files,
+            resolve::resolve_paths,
             presets::save_preset,
             presets::load_preset,
             presets::list_presets,

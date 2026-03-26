@@ -38,7 +38,7 @@
       });
       if (selected) {
         const paths = Array.isArray(selected) ? selected : [selected];
-        addPaths(paths);
+        await addPaths(paths);
       }
     } catch {
       // user cancelled
@@ -53,7 +53,7 @@
         title: 'Select folder to sort'
       });
       if (selected) {
-        addPaths([selected]);
+        await addPaths([selected]);
       }
     } catch {
       // user cancelled
@@ -87,6 +87,16 @@
     }
   }
 
+  function getUniqueParentDirs(paths: string[]): Set<string> {
+    return new Set(
+      paths.map((p) => {
+        const normalized = p.replace(/\\/g, '/');
+        const lastSlash = normalized.lastIndexOf('/');
+        return lastSlash >= 0 ? normalized.substring(0, lastSlash) : normalized;
+      })
+    );
+  }
+
   async function handleSort() {
     const paths = getSelectedPaths();
     const rules = getRules();
@@ -103,6 +113,12 @@
     const validRules = rules.filter((r) => r.contains.trim() && r.target_folder.trim());
     if (validRules.length === 0) {
       setStatusMessage('Rules need both "Contains" and "Folder" fields');
+      return;
+    }
+
+    const parentDirs = getUniqueParentDirs(paths);
+    if (parentDirs.size > 1 && !getOutputDir()) {
+      setStatusMessage('Output directory required when files come from multiple folders');
       return;
     }
 

@@ -6,9 +6,47 @@
   import { getSelectedPaths, addPaths, removePath } from '$lib/stores/app.svelte';
   import { getRules } from '$lib/stores/rules.svelte';
   import { setSortStatus, setStatusMessage, setCanUndo, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
-  import type { SortResult } from '$lib/types';
+  import type { Rule, SortResult } from '$lib/types';
 
   let dragOver = $state(false);
+
+  type SortMode = 'none' | 'name' | 'rules';
+  let sortMode = $state<SortMode>('none');
+
+  function getFilename(path: string): string {
+    const normalized = path.replace(/\\/g, '/');
+    return normalized.substring(normalized.lastIndexOf('/') + 1).toLowerCase();
+  }
+
+  function ruleMatchesFile(rule: Rule, filename: string): boolean {
+    const contains = rule.contains.trim().toLowerCase();
+    if (!contains || !rule.target_folder.trim()) return false;
+    if (!filename.includes(contains)) return false;
+    const containsNot = rule.contains_not?.trim().toLowerCase();
+    if (containsNot && filename.includes(containsNot)) return false;
+    return true;
+  }
+
+  let matchCounts = $derived(
+    new Map(
+      getSelectedPaths().map((path) => {
+        const filename = getFilename(path);
+        const count = getRules().filter((r) => ruleMatchesFile(r, filename)).length;
+        return [path, count] as const;
+      })
+    )
+  );
+
+  let sortedPaths = $derived.by(() => {
+    const paths = getSelectedPaths();
+    if (sortMode === 'none') return paths;
+    return [...paths].sort((a, b) => {
+      if (sortMode === 'name') {
+        return getFilename(a).localeCompare(getFilename(b));
+      }
+      return (matchCounts.get(b) ?? 0) - (matchCounts.get(a) ?? 0);
+    });
+  });
 
   onMount(() => {
     const unlisten = getCurrentWebview().onDragDropEvent((event) => {
@@ -159,7 +197,19 @@
 <div class="drop-zone-panel">
   <div class="drop-zone-header">
     <h2>Files & Folders</h2>
-    <span class="path-count">{getSelectedPaths().length} selected</span>
+    <div class="header-controls">
+      <button class="sort-toggle" onclick={() => {
+        if (sortMode === 'none') sortMode = 'name';
+        else if (sortMode === 'name') sortMode = 'rules';
+        else sortMode = 'none';
+      }}>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2 3H10M3 6H9M4 9H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        {sortMode === 'none' ? 'Unsorted' : sortMode === 'name' ? 'By Name' : 'By Rules'}
+      </button>
+      <span class="path-count">{getSelectedPaths().length} selected</span>
+    </div>
   </div>
 
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -185,9 +235,12 @@
       </div>
     {:else}
       <div class="path-list">
-        {#each getSelectedPaths() as path}
-          <div class="path-item">
+        {#each sortedPaths as path}
+          <div class="path-item" class:has-rules={(matchCounts.get(path) ?? 0) > 0}>
             <span class="path-text" title={path}>{shortenPath(path)}</span>
+            {#if (matchCounts.get(path) ?? 0) > 0}
+              <span class="rule-badge" title="{matchCounts.get(path)} rule(s) match">{matchCounts.get(path)}</span>
+            {/if}
             <button class="remove-path" onclick={() => removePath(path)} title="Remove">
               <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
                 <path d="M2 2L12 12M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -266,6 +319,31 @@
     margin: 0;
   }
 
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .sort-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 3px 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .sort-toggle:hover {
+    border-color: var(--border-hover);
+    color: var(--text);
+  }
+
   .path-count {
     font-size: 12px;
     color: var(--text-muted);
@@ -336,6 +414,12 @@
     background: var(--surface-2);
     border-radius: 6px;
     border: 1px solid var(--border);
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .path-item.has-rules {
+    border-left: 3px solid var(--accent);
+    background: rgba(99, 102, 241, 0.06);
   }
 
   .path-text {
@@ -346,6 +430,19 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     flex: 1;
+  }
+
+  .rule-badge {
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--accent);
+    color: white;
+    border-radius: 8px;
+    padding: 1px 6px;
+    min-width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+    margin-left: 6px;
   }
 
   .remove-path {

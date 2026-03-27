@@ -42,6 +42,32 @@ invoice_draft_003.pdf          ← excluded by "Contains NOT: draft"
 
 Rule 1 moves `invoice_2024_001.pdf` into `Invoices/`. Then Rule 2 walks again and finds it inside `Invoices/`, moving it into `Invoices/2024/`.
 
+## Installing
+
+Binaries are available on the [Releases](https://github.com/polisvfx/FileSorter/releases) page. Because FileSorter is open source and unsigned (no paid certificate), your OS may show a security warning on first launch.
+
+### macOS
+
+Gatekeeper will block the app from opening. To allow it:
+
+**Option 1 — Right-click open** (easiest):
+1. Right-click `FileSorter.dmg` → Open
+2. Right-click the installed app → Open → click Open in the dialog
+
+**Option 2 — System Settings**:
+System Settings → Privacy & Security → scroll down → click **Open Anyway**
+
+**Option 3 — Terminal** (removes the macOS quarantine flag):
+```bash
+xattr -cr /Applications/FileSorter.app
+```
+
+### Windows
+
+SmartScreen will show "Windows protected your PC":
+1. Click **More info**
+2. Click **Run anyway**
+
 ## Features
 
 - **Drag-and-drop rule reordering** — drag rules to change execution order

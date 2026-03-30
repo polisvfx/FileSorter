@@ -65,7 +65,9 @@ fn matches_rule(filename: &str, rule: &Rule) -> bool {
 }
 
 /// Execute sorting rules on the given paths.
-/// Rules are applied sequentially; each rule re-walks the filesystem.
+/// All rules are evaluated per file to resolve a final destination path before
+/// any move/copy is performed. This ensures every matching rule is applied even
+/// when multiple rules target the same file.
 pub fn execute_sort(
     roots: Vec<PathBuf>,
     rules: &[Rule],
@@ -75,75 +77,80 @@ pub fn execute_sort(
     let mut operations = Vec::new();
     let mut errors = Vec::new();
 
-    for rule in rules {
-        let files = collect_files(&roots);
+    let files = collect_files(&roots);
 
-        for file_path in files {
-            let filename = match file_path.file_name() {
+    for file_path in files {
+        // Walk all rules to resolve the final destination path.
+        let mut current_path = file_path.clone();
+
+        for rule in rules {
+            let current_filename = match current_path.file_name() {
                 Some(name) => name.to_string_lossy().to_string(),
-                None => continue,
+                None => break,
             };
 
-            if !matches_rule(&filename, rule) {
+            if !matches_rule(&current_filename, rule) {
                 continue;
             }
 
             let target_dir = if let Some(ref out) = output_dir {
                 out.join(&rule.target_folder)
             } else {
-                let parent = match file_path.parent() {
+                let parent = match current_path.parent() {
                     Some(p) => p,
-                    None => continue,
+                    None => break,
                 };
                 parent.join(&rule.target_folder)
             };
 
-            // Create target directory if needed
-            if let Err(e) = fs::create_dir_all(&target_dir) {
-                errors.push(format!(
-                    "Failed to create directory '{}': {}",
-                    target_dir.display(),
-                    e
-                ));
-                continue;
-            }
+            current_path = target_dir.join(&current_filename);
+        }
 
-            let target_path = target_dir.join(&filename);
-            let final_path = resolve_conflict(&target_path);
+        // No rules matched — leave the file in place.
+        if current_path == file_path {
+            continue;
+        }
 
-            if copy_mode {
-                match fs::copy(&file_path, &final_path) {
-                    Ok(_) => {
-                        operations.push(FileOperation {
-                            original_path: file_path,
-                            new_path: final_path,
-                            copied: true,
-                        });
-                    }
-                    Err(e) => {
-                        errors.push(format!(
-                            "Failed to copy '{}': {}",
-                            file_path.display(),
-                            e
-                        ));
-                    }
+        // Create target directory if needed.
+        let target_dir = match current_path.parent() {
+            Some(p) => p.to_path_buf(),
+            None => continue,
+        };
+        if let Err(e) = fs::create_dir_all(&target_dir) {
+            errors.push(format!(
+                "Failed to create directory '{}': {}",
+                target_dir.display(),
+                e
+            ));
+            continue;
+        }
+
+        let final_path = resolve_conflict(&current_path);
+
+        if copy_mode {
+            match fs::copy(&file_path, &final_path) {
+                Ok(_) => {
+                    operations.push(FileOperation {
+                        original_path: file_path,
+                        new_path: final_path,
+                        copied: true,
+                    });
                 }
-            } else {
-                match fs::rename(&file_path, &final_path) {
-                    Ok(_) => {
-                        operations.push(FileOperation {
-                            original_path: file_path,
-                            new_path: final_path,
-                            copied: false,
-                        });
-                    }
-                    Err(e) => {
-                        errors.push(format!(
-                            "Failed to move '{}': {}",
-                            file_path.display(),
-                            e
-                        ));
-                    }
+                Err(e) => {
+                    errors.push(format!("Failed to copy '{}': {}", file_path.display(), e));
+                }
+            }
+        } else {
+            match fs::rename(&file_path, &final_path) {
+                Ok(_) => {
+                    operations.push(FileOperation {
+                        original_path: file_path,
+                        new_path: final_path,
+                        copied: false,
+                    });
+                }
+                Err(e) => {
+                    errors.push(format!("Failed to move '{}': {}", file_path.display(), e));
                 }
             }
         }

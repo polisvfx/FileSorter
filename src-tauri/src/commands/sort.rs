@@ -93,14 +93,20 @@ pub fn execute_sort(
                 continue;
             }
 
+            let effective_folder = if rule.target_folder.trim().is_empty() {
+                rule.contains.trim().to_string()
+            } else {
+                rule.target_folder.trim().to_string()
+            };
+
             let target_dir = if let Some(ref out) = output_dir {
-                out.join(&rule.target_folder)
+                out.join(&effective_folder)
             } else {
                 let parent = match current_path.parent() {
                     Some(p) => p,
                     None => break,
                 };
-                parent.join(&rule.target_folder)
+                parent.join(&effective_folder)
             };
 
             current_path = target_dir.join(&current_filename);

@@ -3,7 +3,7 @@
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
-  import { getSelectedPaths, addPaths, removePath } from '$lib/stores/app.svelte';
+  import { getSelectedPaths, addPaths, removePath, clearPaths } from '$lib/stores/app.svelte';
   import { getRules } from '$lib/stores/rules.svelte';
   import { setSortStatus, setStatusMessage, setCanUndo, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
   import type { Rule, SortResult } from '$lib/types';
@@ -208,6 +208,11 @@
         </svg>
         {sortMode === 'none' ? 'Unsorted' : sortMode === 'name' ? 'By Name' : 'By Rules'}
       </button>
+      {#if getSelectedPaths().length > 0}
+        <button class="clear-btn" onclick={clearPaths} title="Clear all">
+          Clear
+        </button>
+      {/if}
       <span class="path-count">{getSelectedPaths().length} selected</span>
     </div>
   </div>
@@ -342,6 +347,22 @@
   .sort-toggle:hover {
     border-color: var(--border-hover);
     color: var(--text);
+  }
+
+  .clear-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 3px 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .clear-btn:hover {
+    border-color: var(--danger);
+    color: var(--danger);
   }
 
   .path-count {

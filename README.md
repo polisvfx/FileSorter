@@ -2,6 +2,10 @@
 
 A cross-platform desktop application that organizes files into subfolders based on user-defined filename rules. Built with Tauri v2 (Rust) and Svelte 5.
 
+## Screenshot
+
+![FileSorter screenshot](media/screenshot.png)
+
 ## How It Works
 
 FileSorter uses an ordered list of rules to sort files into folders. Each rule has three fields:
@@ -20,27 +24,40 @@ Given these rules:
 
 | # | Contains | Contains NOT | Target Folder |
 |---|---|---|---|
-| 1 | `invoice` | `draft` | `Invoices` |
-| 2 | `2024` | | `2024` |
+| 1 | `16x9` | | `16x9` |
+| 2 | `9x16` | | `9x16` |
+| 3 | `1x1` | | `1x1` |
+| 4 | `_30s` | | `30s` |
+| 5 | `_15s` | | `15s` |
+| 6 | `_6s` | | `6s` |
 
 And these files:
 ```
-invoice_2024_001.pdf
-invoice_draft_003.pdf
-report_2024.pdf
+ClientName_CampaignA_16x9_30s_v01.mp4
+ClientName_CampaignA_16x9_15s_v01.mp4
+ClientName_CampaignA_9x16_30s_v01.mp4
+ClientName_CampaignA_9x16_15s_v01.mp4
+ClientName_CampaignA_1x1_6s_v01.mp4
 ```
 
 After sorting:
 ```
-Invoices/
-  2024/
-    invoice_2024_001.pdf
-2024/
-  report_2024.pdf
-invoice_draft_003.pdf          ← excluded by "Contains NOT: draft"
+16x9/
+  30s/
+    ClientName_CampaignA_16x9_30s_v01.mp4
+  15s/
+    ClientName_CampaignA_16x9_15s_v01.mp4
+9x16/
+  30s/
+    ClientName_CampaignA_9x16_30s_v01.mp4
+  15s/
+    ClientName_CampaignA_9x16_15s_v01.mp4
+1x1/
+  6s/
+    ClientName_CampaignA_1x1_6s_v01.mp4
 ```
 
-Rule 1 moves `invoice_2024_001.pdf` into `Invoices/`. Then Rule 2 walks again and finds it inside `Invoices/`, moving it into `Invoices/2024/`.
+Rules 1–3 move each file into its aspect ratio folder. Rules 4–6 then walk again and sort within those folders by duration — building a full `aspect/duration/` hierarchy in a single pass.
 
 ## Installing
 

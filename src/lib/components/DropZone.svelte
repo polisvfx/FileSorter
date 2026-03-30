@@ -6,26 +6,13 @@
   import { getSelectedPaths, addPaths, removePath, clearPaths } from '$lib/stores/app.svelte';
   import { getRules } from '$lib/stores/rules.svelte';
   import { setSortStatus, setStatusMessage, setCanUndo, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
-  import type { Rule, SortResult } from '$lib/types';
+  import type { SortResult } from '$lib/types';
+  import { getFilename, ruleMatchesFile } from '$lib/utils';
 
   let dragOver = $state(false);
 
   type SortMode = 'none' | 'name' | 'rules';
   let sortMode = $state<SortMode>('none');
-
-  function getFilename(path: string): string {
-    const normalized = path.replace(/\\/g, '/');
-    return normalized.substring(normalized.lastIndexOf('/') + 1).toLowerCase();
-  }
-
-  function ruleMatchesFile(rule: Rule, filename: string): boolean {
-    const contains = rule.contains.trim().toLowerCase();
-    if (!contains || !rule.target_folder.trim()) return false;
-    if (!filename.includes(contains)) return false;
-    const containsNot = rule.contains_not?.trim().toLowerCase();
-    if (containsNot && filename.includes(containsNot)) return false;
-    return true;
-  }
 
   let matchCounts = $derived(
     new Map(
@@ -148,9 +135,9 @@
       setStatusMessage('No rules defined');
       return;
     }
-    const validRules = rules.filter((r) => r.contains.trim() && r.target_folder.trim());
+    const validRules = rules.filter((r) => r.contains.trim());
     if (validRules.length === 0) {
-      setStatusMessage('Rules need both "Contains" and "Folder" fields');
+      setStatusMessage('Rules need the "Contains" field filled in');
       return;
     }
 

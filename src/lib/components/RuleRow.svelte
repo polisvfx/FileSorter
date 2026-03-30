@@ -1,8 +1,14 @@
 <script lang="ts">
   import type { Rule } from '$lib/types';
   import { updateRule, removeRule } from '$lib/stores/rules.svelte';
+  import { getSelectedPaths } from '$lib/stores/app.svelte';
+  import { getFilename, ruleMatchesFile } from '$lib/utils';
 
   let { rule, index }: { rule: Rule; index: number } = $props();
+
+  let matchCount = $derived(
+    getSelectedPaths().filter((p) => ruleMatchesFile(rule, getFilename(p))).length
+  );
 </script>
 
 <div class="rule-row">
@@ -40,11 +46,15 @@
         id="target-{rule.id}"
         type="text"
         value={rule.target_folder}
-        placeholder="e.g. Invoices"
+        placeholder={rule.contains.trim() || 'e.g. Invoices'}
         oninput={(e) => updateRule(rule.id, 'target_folder', (e.target as HTMLInputElement).value)}
       />
     </div>
   </div>
+
+  {#if matchCount > 0}
+    <span class="match-badge" title="{matchCount} file{matchCount === 1 ? '' : 's'} match">{matchCount}</span>
+  {/if}
 
   <button class="delete-btn" onclick={() => removeRule(rule.id)} title="Remove rule">
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -122,6 +132,18 @@
   input::placeholder {
     color: var(--text-muted);
     opacity: 0.5;
+  }
+
+  .match-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: white;
+    background: var(--accent);
+    border-radius: 10px;
+    padding: 1px 7px;
+    min-width: 20px;
+    text-align: center;
+    flex-shrink: 0;
   }
 
   .delete-btn {

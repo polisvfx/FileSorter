@@ -12,13 +12,23 @@ FileSorter uses an ordered list of rules to sort files into folders. Each rule h
 
 | Field | Required | Description |
 |---|---|---|
-| **Contains** | Yes | Substring to match in filenames (case-insensitive) |
-| **Contains NOT** | No | Exclusion substring — skip files that also contain this |
+| **Contains** | Yes | Substring(s) to match in filenames (case-insensitive). Supports `,` (OR) and `*` (AND) — see below |
+| **Contains NOT** | No | Exclusion substring(s) — skip files that also match this. Supports the same `,`/`*` syntax |
 | **Target Folder** | Yes | Folder name to move matching files into |
 | **Enabled** | Yes (default on) | Untick to skip this rule during sorting without deleting it |
 | **Stop on Match** | No (default off) | When a file matches this rule, skip all later rules for that file |
 
 Rules execute **top-to-bottom in order**. Each rule walks the entire directory tree recursively, so Rule 2 sees the filesystem *after* Rule 1 has already moved files. This lets you build intricate nested folder structures in a single pass.
+
+### Contains / Contains NOT operators
+
+`Contains` and `Contains NOT` accept simple boolean expressions:
+
+- `,` means **OR** — `invoice,receipt` matches filenames containing either `invoice` or `receipt`.
+- `*` means **AND** — `invoice*2024` matches filenames containing both `invoice` and `2024`.
+- `*` binds tighter than `,`, so `invoice*2024,receipt` means `(invoice AND 2024) OR receipt`.
+
+If `Target Folder` is left blank, the folder name falls back to the `Contains` value with `,`/`*` replaced by spaces (e.g. `invoice*2024` → folder `invoice 2024`), since `*` isn't a valid character in folder names on Windows.
 
 ### Example
 

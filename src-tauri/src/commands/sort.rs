@@ -48,20 +48,53 @@ pub(crate) fn collect_files(roots: &[PathBuf]) -> Vec<PathBuf> {
     files
 }
 
+/// Evaluate a Contains/Contains-NOT expression against a (lowercased) filename.
+/// "," is OR, "*" is AND, and AND binds tighter than OR: `a,b*c` means `a OR (b AND c)`.
+/// An expression with no non-empty terms (e.g. empty, or only operators) matches everything,
+/// matching the historical behavior of an empty Contains field.
+fn expr_matches(filename_lower: &str, expr: &str) -> bool {
+    let mut any_group = false;
+    for group in expr.split(',') {
+        let terms: Vec<String> = group
+            .split('*')
+            .map(|t| t.trim().to_lowercase())
+            .filter(|t| !t.is_empty())
+            .collect();
+        if terms.is_empty() {
+            continue;
+        }
+        any_group = true;
+        if terms.iter().all(|t| filename_lower.contains(t.as_str())) {
+            return true;
+        }
+    }
+    !any_group
+}
+
 /// Check if a file matches a rule (case-insensitive).
 fn matches_rule(filename: &str, rule: &Rule) -> bool {
     let lower = filename.to_lowercase();
-    let contains_match = lower.contains(&rule.contains.to_lowercase());
-    if !contains_match {
+    if !expr_matches(&lower, &rule.contains) {
         return false;
     }
     if let Some(ref not) = rule.contains_not {
         let not_trimmed = not.trim();
-        if !not_trimmed.is_empty() && lower.contains(&not_trimmed.to_lowercase()) {
+        if !not_trimmed.is_empty() && expr_matches(&lower, not_trimmed) {
             return false;
         }
     }
     true
+}
+
+/// Turn a Contains expression into a filesystem-safe folder name for the
+/// target-folder auto-fallback, e.g. "invoice*2024" -> "invoice 2024".
+/// Needed because "*" is a reserved character in Windows folder names.
+fn sanitize_folder_name(expr: &str) -> String {
+    expr.split(|c| c == ',' || c == '*')
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Execute sorting rules on the given paths.
@@ -98,7 +131,7 @@ pub fn execute_sort(
             }
 
             let effective_folder = if rule.target_folder.trim().is_empty() {
-                rule.contains.trim().to_string()
+                sanitize_folder_name(&rule.contains)
             } else {
                 rule.target_folder.trim().to_string()
             };

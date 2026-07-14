@@ -3,6 +3,7 @@ export interface Rule {
   contains: string;
   contains_not: string | null;
   target_folder: string;
+  stop_on_match: boolean;
 }
 
 export interface FileOperation {

@@ -20,7 +20,8 @@ export function addRule() {
     contains: '',
     contains_not: null,
     target_folder: '',
-    enabled: true
+    enabled: true,
+    stop_on_match: false
   });
 }
 

@@ -9,6 +9,8 @@ pub struct Rule {
     pub target_folder: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default)]
+    pub stop_on_match: bool,
 }
 
 fn default_true() -> bool {

@@ -4,6 +4,7 @@ export interface Rule {
   contains_not: string | null;
   target_folder: string;
   enabled: boolean;
+  stop_on_match: boolean;
 }
 
 export interface FileOperation {

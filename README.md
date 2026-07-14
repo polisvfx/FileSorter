@@ -15,6 +15,7 @@ FileSorter uses an ordered list of rules to sort files into folders. Each rule h
 | **Contains** | Yes | Substring to match in filenames (case-insensitive) |
 | **Contains NOT** | No | Exclusion substring — skip files that also contain this |
 | **Target Folder** | Yes | Folder name to move matching files into |
+| **Enabled** | Yes (default on) | Untick to skip this rule during sorting without deleting it |
 
 Rules execute **top-to-bottom in order**. Each rule walks the entire directory tree recursively, so Rule 2 sees the filesystem *after* Rule 1 has already moved files. This lets you build intricate nested folder structures in a single pass.
 
@@ -88,6 +89,7 @@ SmartScreen will show "Windows protected your PC":
 ## Features
 
 - **Drag-and-drop rule reordering** — drag rules to change execution order
+- **Enable/disable rules** — toggle a rule off without losing its configuration
 - **File & folder input** — drop files/folders from your OS file browser or use the native browse dialog
 - **Saveable presets** — save and load rule configurations for different workflows
 - **Undo** — reverse the last sort operation, restoring all files to their original locations

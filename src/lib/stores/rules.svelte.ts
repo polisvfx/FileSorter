@@ -19,7 +19,8 @@ export function addRule() {
     id: nextId++,
     contains: '',
     contains_not: null,
-    target_folder: ''
+    target_folder: '',
+    enabled: true
   });
 }
 
@@ -27,7 +28,7 @@ export function removeRule(id: number) {
   rules = rules.filter((r) => r.id !== id);
 }
 
-export function updateRule(id: number, field: keyof Rule, value: string | null) {
+export function updateRule(id: number, field: keyof Rule, value: string | boolean | null) {
   const rule = rules.find((r) => r.id === id);
   if (rule) {
     (rule as any)[field] = value;

@@ -84,6 +84,10 @@ pub fn execute_sort(
         let mut current_path = file_path.clone();
 
         for rule in rules {
+            if !rule.enabled {
+                continue;
+            }
+
             let current_filename = match current_path.file_name() {
                 Some(name) => name.to_string_lossy().to_string(),
                 None => break,

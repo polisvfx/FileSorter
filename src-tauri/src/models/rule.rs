@@ -7,4 +7,6 @@ pub struct Rule {
     #[serde(default)]
     pub contains_not: Option<String>,
     pub target_folder: String,
+    #[serde(default)]
+    pub stop_on_match: bool,
 }

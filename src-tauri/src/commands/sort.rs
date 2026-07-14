@@ -110,6 +110,10 @@ pub fn execute_sort(
             };
 
             current_path = target_dir.join(&current_filename);
+
+            if rule.stop_on_match {
+                break;
+            }
         }
 
         // No rules matched — leave the file in place.

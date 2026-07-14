@@ -56,6 +56,16 @@
     <span class="match-badge" title="{matchCount} file{matchCount === 1 ? '' : 's'} match">{matchCount}</span>
   {/if}
 
+  <label class="stop-toggle" title="Stop on Match — files matching this rule skip all later rules">
+    <input
+      type="checkbox"
+      checked={rule.stop_on_match}
+      onchange={(e) => updateRule(rule.id, 'stop_on_match', (e.target as HTMLInputElement).checked)}
+    />
+    <span class="stop-toggle-slider"></span>
+    <span class="stop-toggle-label">Stop on Match</span>
+  </label>
+
   <button class="delete-btn" onclick={() => removeRule(rule.id)} title="Remove rule">
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
       <path d="M2 2L12 12M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -144,6 +154,61 @@
     min-width: 20px;
     text-align: center;
     flex-shrink: 0;
+  }
+
+  .stop-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+
+  .stop-toggle input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .stop-toggle-slider {
+    position: relative;
+    display: inline-block;
+    width: 26px;
+    height: 15px;
+    background: var(--border);
+    border-radius: 999px;
+    transition: background 0.15s;
+    flex-shrink: 0;
+  }
+
+  .stop-toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 11px;
+    width: 11px;
+    left: 2px;
+    top: 2px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.15s;
+  }
+
+  .stop-toggle input:checked + .stop-toggle-slider {
+    background: var(--accent);
+  }
+
+  .stop-toggle input:checked + .stop-toggle-slider::before {
+    transform: translateX(11px);
+  }
+
+  .stop-toggle-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    white-space: nowrap;
   }
 
   .delete-btn {

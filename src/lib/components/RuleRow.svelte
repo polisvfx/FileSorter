@@ -11,8 +11,17 @@
   );
 </script>
 
-<div class="rule-row">
+<div class="rule-row" class:disabled={!rule.enabled}>
   <span class="rule-number">{index + 1}</span>
+
+  <label class="toggle-switch" title={rule.enabled ? 'Disable rule' : 'Enable rule'}>
+    <input
+      type="checkbox"
+      checked={rule.enabled}
+      onchange={(e) => updateRule(rule.id, 'enabled', (e.target as HTMLInputElement).checked)}
+    />
+    <span class="toggle-slider"></span>
+  </label>
 
   <div class="rule-fields">
     <div class="field">
@@ -88,6 +97,53 @@
   .rule-row:hover {
     border-color: var(--border-hover);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .rule-row.disabled {
+    opacity: 0.5;
+  }
+
+  .toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 30px;
+    height: 17px;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--border);
+    border-radius: 999px;
+    transition: background 0.15s;
+  }
+
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 13px;
+    width: 13px;
+    left: 2px;
+    top: 2px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.15s;
+  }
+
+  .toggle-switch input:checked + .toggle-slider {
+    background: var(--accent);
+  }
+
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(13px);
   }
 
   .rule-number {

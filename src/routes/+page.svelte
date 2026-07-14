@@ -20,7 +20,9 @@
   onMount(() => {
     const session = loadSession();
     if (session) {
-      if (session.rules?.length) setRules(session.rules);
+      if (session.rules?.length) {
+        setRules(session.rules.map((r) => ({ ...r, enabled: r.enabled ?? true })));
+      }
       if (session.outputDir) setOutputDir(session.outputDir);
       if (session.copyMode) setCopyMode(session.copyMode);
       if (session.selectedPaths?.length) setPaths(session.selectedPaths);

@@ -112,7 +112,14 @@ xattr -cr /Applications/FileSorter.app
 
 ### Windows
 
-SmartScreen will show "Windows protected your PC":
+Two options are published:
+
+- **Installer** — `FileSorter_<version>_x64-setup.exe` or `.msi`
+- **Portable** — `FileSorter_<version>_x64_portable.exe`, a single self-contained executable that needs no installation. Settings and presets are still stored in `%APPDATA%\com.filesorter.app`, so it is portable in the "no install" sense rather than the "leaves no trace" sense.
+
+The portable build relies on the WebView2 runtime, which is part of Windows 11 and reaches Windows 10 through Windows Update — present on virtually every current machine. If it is missing, install the [Evergreen WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) or use the installer, which bundles it.
+
+Either way, SmartScreen will show "Windows protected your PC":
 1. Click **More info**
 2. Click **Run anyway**
 

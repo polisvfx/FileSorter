@@ -1,9 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { PreviewEntry, Rule } from '$lib/types';
+import type { PreviewEntry, PreviewResult, Rule, RuleError } from '$lib/types';
 
 const DEBOUNCE_MS = 200;
 
 let entries = $state<PreviewEntry[]>([]);
+let ruleErrors = $state<RuleError[]>([]);
 let error = $state<string | null>(null);
 let pending = $state(false);
 
@@ -68,8 +69,18 @@ export function getMatchCountForRule(ruleId: number): number {
   return matchCountByRule.get(ruleId) ?? 0;
 }
 
+/** Compile error for this rule, if its pattern is currently invalid. */
+export function getRuleError(ruleId: number): string | null {
+  return ruleErrors.find((e) => e.rule_id === ruleId)?.message ?? null;
+}
+
+export function hasRuleErrors(): boolean {
+  return ruleErrors.length > 0;
+}
+
 function reset() {
   entries = [];
+  ruleErrors = [];
   error = null;
   pending = false;
 }
@@ -91,13 +102,15 @@ export function requestPreview(paths: string[], rules: Rule[], outputDir: string
   timer = setTimeout(async () => {
     const token = ++runToken;
     try {
-      const result = await invoke<PreviewEntry[]>('preview_sort', { paths, rules, outputDir });
+      const result = await invoke<PreviewResult>('preview_sort', { paths, rules, outputDir });
       if (token !== runToken) return;
-      entries = result;
+      entries = result.entries;
+      ruleErrors = result.rule_errors;
       error = null;
     } catch (err) {
       if (token !== runToken) return;
       entries = [];
+      ruleErrors = [];
       error = String(err);
     } finally {
       if (token === runToken) pending = false;

@@ -1,3 +1,4 @@
+use super::matching::{compile_rules, RuleError};
 use super::sort::{collect_files, resolve_conflict, resolve_destination};
 use crate::models::Rule;
 use serde::Serialize;
@@ -11,7 +12,15 @@ pub struct PreviewEntry {
     pub matched_rule_ids: Vec<u32>,
 }
 
-/// Resolve where every file would end up, without touching the filesystem.
+#[derive(Debug, Clone, Serialize)]
+pub struct PreviewResult {
+    pub entries: Vec<PreviewEntry>,
+    /// Rules that would not compile — reported rather than silently skipped, so
+    /// a half-typed regex shows up on the rule instead of just yielding no matches.
+    pub rule_errors: Vec<RuleError>,
+}
+
+/// Resolve where every file would end up, without moving anything.
 ///
 /// Conflicts are simulated against both what is already on disk and the
 /// destinations claimed by earlier entries in this same run, so the names shown
@@ -21,16 +30,18 @@ pub fn preview_sort(
     paths: Vec<String>,
     rules: Vec<Rule>,
     output_dir: Option<String>,
-) -> Result<Vec<PreviewEntry>, String> {
+) -> Result<PreviewResult, String> {
     let roots: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     let out_path = output_dir.map(PathBuf::from);
+
+    let (compiled, rule_errors) = compile_rules(&rules);
 
     let mut entries = Vec::new();
     let mut claimed: HashSet<PathBuf> = HashSet::new();
 
     for file_path in collect_files(&roots) {
         let Some((dest, matched_rule_ids)) =
-            resolve_destination(&file_path, &rules, out_path.as_deref())
+            resolve_destination(&file_path, &compiled, out_path.as_deref())
         else {
             continue;
         };
@@ -45,27 +56,20 @@ pub fn preview_sort(
         });
     }
 
-    Ok(entries)
+    Ok(PreviewResult {
+        entries,
+        rule_errors,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::commands::sort::execute_sort;
+    use crate::commands::sort::tests::rule;
     use std::fs;
     use std::io::Write;
     use tempfile::tempdir;
-
-    fn rule(id: u32, contains: &str, folder: &str) -> Rule {
-        Rule {
-            id,
-            contains: contains.to_string(),
-            contains_not: None,
-            target_folder: folder.to_string(),
-            enabled: true,
-            stop_on_match: false,
-        }
-    }
 
     /// The preview is only worth showing if it predicts exactly what the sort does,
     /// conflict suffixes included.
@@ -102,6 +106,7 @@ mod tests {
         assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
 
         let predicted: Vec<_> = preview
+            .entries
             .iter()
             .map(|e| (e.original_path.clone(), e.new_path.clone()))
             .collect();
@@ -112,8 +117,9 @@ mod tests {
             .collect();
 
         assert_eq!(predicted, actual, "preview diverged from the real sort");
-        assert_eq!(preview.len(), 2, "the non-matching file must not appear");
-        assert!(preview.iter().all(|e| e.matched_rule_ids == vec![1]));
+        assert_eq!(preview.entries.len(), 2, "the non-matching file must not appear");
+        assert!(preview.entries.iter().all(|e| e.matched_rule_ids == vec![1]));
+        assert!(preview.rule_errors.is_empty());
     }
 
     #[test]
@@ -131,11 +137,56 @@ mod tests {
         let preview =
             preview_sort(vec![src.to_string_lossy().to_string()], rules, None).unwrap();
 
-        assert_eq!(preview.len(), 1);
-        assert_eq!(preview[0].matched_rule_ids, vec![7, 11]);
+        assert_eq!(preview.entries.len(), 1);
+        assert_eq!(preview.entries[0].matched_rule_ids, vec![7, 11]);
         assert_eq!(
-            preview[0].new_path,
+            preview.entries[0].new_path,
             src.join("16x9").join("30s").join("clip_16x9_30s.mp4")
         );
+    }
+
+    /// The headline reason tokens exist: one rule replaces a list of near-identical
+    /// ones. `{ext}` alone sorts every format into its own folder.
+    #[test]
+    fn one_token_rule_replaces_a_rule_per_extension() {
+        let dir = tempdir().unwrap();
+        let src = dir.path();
+        for name in ["a.mp4", "b.MOV", "c.wav", "d.mp4"] {
+            fs::File::create(src.join(name)).unwrap();
+        }
+
+        let mut r = rule(1, ".", "{ext}");
+        r.regex = true;
+
+        let preview =
+            preview_sort(vec![src.to_string_lossy().to_string()], vec![r], None).unwrap();
+
+        assert!(preview.rule_errors.is_empty());
+        assert_eq!(preview.entries.len(), 4);
+        for (name, folder) in [("a.mp4", "mp4"), ("b.MOV", "mov"), ("c.wav", "wav")] {
+            let entry = preview
+                .entries
+                .iter()
+                .find(|e| e.original_path.ends_with(name))
+                .unwrap_or_else(|| panic!("{name} missing from preview"));
+            assert_eq!(entry.new_path, src.join(folder).join(name));
+        }
+    }
+
+    #[test]
+    fn a_broken_regex_is_reported_and_moves_nothing() {
+        let dir = tempdir().unwrap();
+        let src = dir.path();
+        fs::File::create(src.join("clip.mp4")).unwrap();
+
+        let mut r = rule(1, "([unclosed", "x");
+        r.regex = true;
+
+        let preview =
+            preview_sort(vec![src.to_string_lossy().to_string()], vec![r], None).unwrap();
+
+        assert!(preview.entries.is_empty());
+        assert_eq!(preview.rule_errors.len(), 1);
+        assert_eq!(preview.rule_errors[0].rule_id, 1);
     }
 }

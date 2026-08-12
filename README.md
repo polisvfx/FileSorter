@@ -17,6 +17,9 @@ FileSorter uses an ordered list of rules to sort files into folders. Each rule h
 | **Target Folder** | Yes | Folder name to move matching files into |
 | **Enabled** | Yes (default on) | Untick to skip this rule during sorting without deleting it |
 | **Stop on Match** | No (default off) | When a file matches this rule, skip all later rules for that file |
+| **Match** | Yes (default Name) | Which part of the file to test: `Name` (with extension), `Stem` (without), `Ext` (extension only), or `Path` (full path, so you can match parent folders) |
+| **Aa** | No (default off) | Case-sensitive matching |
+| **.\*** | No (default off) | Treat Contains / Contains NOT as regular expressions. `,` and `*` lose their special meaning — regex has its own syntax |
 
 Rules execute **top-to-bottom in order**, and each matching rule adds one folder level, so rules compose into nested structures in a single pass. Setting an output directory changes where the tree is rooted, not how it nests.
 
@@ -29,6 +32,22 @@ Rules execute **top-to-bottom in order**, and each matching rule adds one folder
 - `*` binds tighter than `,`, so `invoice*2024,receipt` means `(invoice AND 2024) OR receipt`.
 
 If `Target Folder` is left blank, the folder name falls back to the `Contains` value with `,`/`*` replaced by spaces (e.g. `invoice*2024` → folder `invoice 2024`), since `*` isn't a valid character in folder names on Windows.
+
+### Folder tokens
+
+`Target Folder` accepts tokens that are filled in per file, so **one rule can produce many folders**:
+
+| Token | Becomes |
+|---|---|
+| `{ext}` | The extension, lowercased, without the dot |
+| `{stem}` | The filename without its extension |
+| `{name}` | The full filename |
+| `{YYYY}` `{MM}` `{DD}` | Year / month / day the file was last modified |
+| `$1` … `$9` | Regex capture groups (regex mode only) |
+
+A `/` in the template still nests, so `Media/{ext}/{YYYY}` builds a three-level tree. Token *values* are sanitised, so a capture can never inject a path separator.
+
+This is what collapses a long rule list. The six-rule example below can be written as two rules using `{ext}`-style tokens, and sorting a photo library by date is a single rule with folder `{YYYY}/{MM}`.
 
 ### Example
 
@@ -101,7 +120,10 @@ SmartScreen will show "Windows protected your PC":
 
 - **Dry-run preview** — switch the right panel to **Preview** to see exactly where every file will land, grouped by destination folder, before anything moves. Conflict suffixes are simulated too, so the names shown are the names you get
 - **Drag-and-drop rule reordering** — drag rules to change execution order
+- **Regex, case sensitivity, and match scope** — per rule, matched against the name, stem, extension, or full path
+- **Folder tokens** — `{ext}`, `{YYYY}`, regex captures and more, so one rule builds many folders
 - **Enable/disable rules** — toggle a rule off without losing its configuration
+- **Duplicate a rule** — copy a rule in place instead of retyping near-identical ones
 - **Stop on Match** — mark a rule as final so matching files skip all later rules
 - **Live progress with cancel** — a progress bar counts files as they move, and Cancel stops the run cleanly; anything already moved stays undoable
 - **File & folder input** — drop files/folders from your OS file browser or use the native browse dialog. Dropped folders stay collapsed to a single row showing their file count, so a 50,000-file folder is one entry rather than 50,000

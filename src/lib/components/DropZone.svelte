@@ -20,7 +20,8 @@
     getPreviewEntries,
     getPreviewError,
     isPreviewPending,
-    getMatchCountUnder
+    getMatchCountUnder,
+    hasRuleErrors
   } from '$lib/stores/preview.svelte';
   import type { SortResult } from '$lib/types';
   import { getFilename, getDirname, commonDirPrefix, hasSearchTerms } from '$lib/utils';
@@ -207,7 +208,8 @@
     // Blank fields are just unfinished rules and are skipped quietly, but this
     // is a typo worth naming — it used to sweep up every file in the tree.
     const malformed = rules
-      .map((r, i) => ({ number: i + 1, contains: r.contains.trim() }))
+      .filter((r) => !r.regex)
+      .map((r) => ({ number: rules.indexOf(r) + 1, contains: r.contains.trim() }))
       .filter((r) => r.contains.length > 0 && !hasSearchTerms(r.contains));
     if (malformed.length > 0) {
       const list = malformed.map((r) => `#${r.number}`).join(', ');
@@ -215,7 +217,13 @@
       return;
     }
 
-    const validRules = rules.filter((r) => hasSearchTerms(r.contains));
+    if (hasRuleErrors()) {
+      setStatusMessage('Fix the highlighted rule pattern before sorting');
+      return;
+    }
+
+    // Regex patterns have their own syntax, so the ,/* term check doesn't apply.
+    const validRules = rules.filter((r) => r.regex || hasSearchTerms(r.contains));
     if (validRules.length === 0) {
       setStatusMessage('Rules need the "Contains" field filled in');
       return;

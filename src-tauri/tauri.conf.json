@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicerss/tauri/refs/heads/v2/crates/tauri-cli/schema.json",
   "productName": "FileSorter",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "identifier": "com.filesorter.app",
   "build": {
     "frontendDist": "../build",
@@ -14,10 +14,10 @@
     "windows": [
       {
         "title": "FileSorter",
-        "width": 1152,
-        "height": 640,
-        "minWidth": 800,
-        "minHeight": 500,
+        "width": 1320,
+        "height": 720,
+        "minWidth": 1200,
+        "minHeight": 560,
         "center": true
       }
     ],

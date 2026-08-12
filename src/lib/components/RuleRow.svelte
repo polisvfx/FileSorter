@@ -1,14 +1,13 @@
 <script lang="ts">
   import type { Rule } from '$lib/types';
   import { updateRule, removeRule } from '$lib/stores/rules.svelte';
-  import { getSelectedPaths } from '$lib/stores/app.svelte';
-  import { getFilename, ruleMatchesFile } from '$lib/utils';
+  import { getMatchCountForRule } from '$lib/stores/preview.svelte';
 
   let { rule, index }: { rule: Rule; index: number } = $props();
 
-  let matchCount = $derived(
-    getSelectedPaths().filter((p) => ruleMatchesFile(rule, getFilename(p))).length
-  );
+  // Counted from the preview, so this reflects what the rule actually claims —
+  // disabled rules and files taken by an earlier stop-on-match rule don't count.
+  let matchCount = $derived(getMatchCountForRule(rule.id));
 </script>
 
 <div class="rule-row" class:disabled={!rule.enabled}>

@@ -3,26 +3,34 @@
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
-  import { getSelectedPaths, addPaths, removePath, clearPaths } from '$lib/stores/app.svelte';
+  import { getSelectedPaths, addPaths, removePath, clearPaths, setPaths } from '$lib/stores/app.svelte';
   import { getRules } from '$lib/stores/rules.svelte';
-  import { setSortStatus, setStatusMessage, setCanUndo, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
+  import { setSortStatus, getSortStatus, setStatusMessage, setCanUndo, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
+  import {
+    requestPreview,
+    getPreviewEntries,
+    getPreviewError,
+    isPreviewPending,
+    getMatchCountForPath
+  } from '$lib/stores/preview.svelte';
   import type { SortResult } from '$lib/types';
-  import { getFilename, ruleMatchesFile } from '$lib/utils';
+  import { getFilename, getDirname, commonDirPrefix, hasSearchTerms } from '$lib/utils';
 
   let dragOver = $state(false);
 
   type SortMode = 'none' | 'name' | 'rules';
   let sortMode = $state<SortMode>('none');
 
-  let matchCounts = $derived(
-    new Map(
-      getSelectedPaths().map((path) => {
-        const filename = getFilename(path);
-        const count = getRules().filter((r) => ruleMatchesFile(r, filename)).length;
-        return [path, count] as const;
-      })
-    )
-  );
+  type ViewMode = 'files' | 'preview';
+  let viewMode = $state<ViewMode>('files');
+
+  // Reading each field explicitly is what registers the dependency, so editing a
+  // rule's text re-runs the preview rather than only adding/removing rules.
+  $effect(() => {
+    const paths = getSelectedPaths().slice();
+    const rules = getRules().map((r) => ({ ...r }));
+    requestPreview(paths, rules, getOutputDir());
+  });
 
   let sortedPaths = $derived.by(() => {
     const paths = getSelectedPaths();
@@ -31,26 +39,66 @@
       if (sortMode === 'name') {
         return getFilename(a).localeCompare(getFilename(b));
       }
-      return (matchCounts.get(b) ?? 0) - (matchCounts.get(a) ?? 0);
+      return getMatchCountForPath(b) - getMatchCountForPath(a);
     });
   });
 
+  /** Group resolved destinations by target folder, relative to their common root. */
+  let previewGroups = $derived.by(() => {
+    const entries = getPreviewEntries();
+    if (entries.length === 0) return [];
+
+    // Root the labels at where the sort writes from, not at the destinations —
+    // taking the common prefix of the destinations would swallow the folder name
+    // whenever every file lands in the same one.
+    const outputDir = getOutputDir();
+    const root = outputDir
+      ? outputDir.replace(/\\/g, '/').replace(/\/+$/, '')
+      : commonDirPrefix(entries.map((e) => getDirname(e.original_path)));
+
+    const byFolder = new Map<string, { name: string; from: string; renamed: boolean }[]>();
+
+    for (const entry of entries) {
+      const label = getDirname(entry.new_path).slice(root.length).replace(/^\//, '') || '.';
+      const name = getFilename(entry.new_path);
+      const from = getFilename(entry.original_path);
+      const files = byFolder.get(label) ?? [];
+      files.push({ name, from, renamed: name !== from });
+      byFolder.set(label, files);
+    }
+
+    return [...byFolder.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([folder, files]) => ({
+        folder,
+        files: files.sort((a, b) => a.name.localeCompare(b.name))
+      }));
+  });
+
   onMount(() => {
-    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
-      if (event.payload.type === 'over') {
-        dragOver = true;
-      } else if (event.payload.type === 'leave') {
-        dragOver = false;
-      } else if (event.payload.type === 'drop') {
-        dragOver = false;
-        if (event.payload.paths.length > 0) {
-          addPaths(event.payload.paths);
+    // OS drag-and-drop only exists inside the Tauri shell. Guard it so opening the
+    // frontend in a plain browser (`npm run dev` on its own) doesn't throw during
+    // the effect flush, which takes the whole app down with it.
+    let unlisten: Promise<() => void> | null = null;
+    try {
+      unlisten = getCurrentWebview().onDragDropEvent((event) => {
+        if (event.payload.type === 'over') {
+          dragOver = true;
+        } else if (event.payload.type === 'leave') {
+          dragOver = false;
+        } else if (event.payload.type === 'drop') {
+          dragOver = false;
+          if (event.payload.paths.length > 0) {
+            addPaths(event.payload.paths);
+          }
         }
-      }
-    });
+      });
+    } catch {
+      return;
+    }
 
     return () => {
-      unlisten.then((fn) => fn());
+      unlisten?.then((fn) => fn());
     };
   });
 
@@ -135,7 +183,19 @@
       setStatusMessage('No rules defined');
       return;
     }
-    const validRules = rules.filter((r) => r.contains.trim());
+    // A Contains field of bare operators ("*", ",,") has nothing to search for.
+    // Blank fields are just unfinished rules and are skipped quietly, but this
+    // is a typo worth naming — it used to sweep up every file in the tree.
+    const malformed = rules
+      .map((r, i) => ({ number: i + 1, contains: r.contains.trim() }))
+      .filter((r) => r.contains.length > 0 && !hasSearchTerms(r.contains));
+    if (malformed.length > 0) {
+      const list = malformed.map((r) => `#${r.number}`).join(', ');
+      setStatusMessage(`Rule ${list}: "Contains" has no searchable text, only operators`);
+      return;
+    }
+
+    const validRules = rules.filter((r) => hasSearchTerms(r.contains));
     if (validRules.length === 0) {
       setStatusMessage('Rules need the "Contains" field filled in');
       return;
@@ -159,6 +219,13 @@
         outputDir: getOutputDir(),
         copyMode
       });
+
+      // Moved files live somewhere else now — keep the list pointing at them so a
+      // second sort isn't a silent no-op against paths that no longer exist.
+      if (!copyMode && result.operations.length > 0) {
+        const moved = new Map(result.operations.map((op) => [op.original_path, op.new_path]));
+        setPaths(paths.map((p) => moved.get(p) ?? p));
+      }
 
       if (result.errors.length > 0) {
         setSortStatus('error');
@@ -185,16 +252,27 @@
   <div class="drop-zone-header">
     <h2>Files & Folders</h2>
     <div class="header-controls">
-      <button class="sort-toggle" onclick={() => {
-        if (sortMode === 'none') sortMode = 'name';
-        else if (sortMode === 'name') sortMode = 'rules';
-        else sortMode = 'none';
-      }}>
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M2 3H10M3 6H9M4 9H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-        {sortMode === 'none' ? 'Unsorted' : sortMode === 'name' ? 'By Name' : 'By Rules'}
-      </button>
+      <div class="view-switch" role="group" aria-label="Panel view">
+        <button class:active={viewMode === 'files'} onclick={() => (viewMode = 'files')}>Files</button>
+        <button class:active={viewMode === 'preview'} onclick={() => (viewMode = 'preview')}>
+          Preview
+          {#if getPreviewEntries().length > 0}
+            <span class="view-switch-count">{getPreviewEntries().length}</span>
+          {/if}
+        </button>
+      </div>
+      {#if viewMode === 'files'}
+        <button class="sort-toggle" onclick={() => {
+          if (sortMode === 'none') sortMode = 'name';
+          else if (sortMode === 'name') sortMode = 'rules';
+          else sortMode = 'none';
+        }}>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M2 3H10M3 6H9M4 9H8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          {sortMode === 'none' ? 'Unsorted' : sortMode === 'name' ? 'By Name' : 'By Rules'}
+        </button>
+      {/if}
       {#if getSelectedPaths().length > 0}
         <button class="clear-btn" onclick={clearPaths} title="Clear all">
           Clear
@@ -225,19 +303,52 @@
         <p>Drop files or folders here</p>
         <p class="hint">or click to browse</p>
       </div>
-    {:else}
+    {:else if viewMode === 'files'}
       <div class="path-list">
         {#each sortedPaths as path}
-          <div class="path-item" class:has-rules={(matchCounts.get(path) ?? 0) > 0}>
+          <div class="path-item" class:has-rules={getMatchCountForPath(path) > 0}>
             <span class="path-text" title={path}>{shortenPath(path)}</span>
-            {#if (matchCounts.get(path) ?? 0) > 0}
-              <span class="rule-badge" title="{matchCounts.get(path)} rule(s) match">{matchCounts.get(path)}</span>
+            {#if getMatchCountForPath(path) > 0}
+              <span class="rule-badge" title="{getMatchCountForPath(path)} rule(s) match">{getMatchCountForPath(path)}</span>
             {/if}
             <button class="remove-path" onclick={() => removePath(path)} title="Remove">
               <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
                 <path d="M2 2L12 12M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
               </svg>
             </button>
+          </div>
+        {/each}
+      </div>
+    {:else if getPreviewError()}
+      <div class="preview-empty">
+        <p class="preview-error">Preview failed</p>
+        <p class="hint">{getPreviewError()}</p>
+      </div>
+    {:else if previewGroups.length === 0}
+      <div class="preview-empty">
+        <p>{isPreviewPending() ? 'Working out destinations…' : 'No files match the current rules'}</p>
+        <p class="hint">{isPreviewPending() ? '' : 'Nothing would be moved'}</p>
+      </div>
+    {:else}
+      <div class="preview-list" class:stale={isPreviewPending()}>
+        {#each previewGroups as group}
+          <div class="preview-group">
+            <div class="preview-folder">
+              <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                <rect x="1" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M1 5.5L1 3.5C1 2.67 1.67 2 2.5 2H5.5L7 4H11.5C12.33 4 13 4.67 13 5.5" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+              <span class="preview-folder-name">{group.folder === '.' ? '(no subfolder)' : group.folder}</span>
+              <span class="preview-folder-count">{group.files.length}</span>
+            </div>
+            {#each group.files as file}
+              <div class="preview-file">
+                <span class="preview-name" title={file.name}>{file.name}</span>
+                {#if file.renamed}
+                  <span class="preview-note" title="Renamed to avoid a name clash: {file.from}">renamed</span>
+                {/if}
+              </div>
+            {/each}
           </div>
         {/each}
       </div>
@@ -283,8 +394,12 @@
       <input type="checkbox" checked={getCopyMode()} onchange={(e) => setCopyMode(e.currentTarget.checked)} />
       <span>Copy</span>
     </label>
-    <button class="sort-btn" onclick={handleSort} disabled={getSelectedPaths().length === 0 || getRules().length === 0}>
-      Sort Now
+    <button
+      class="sort-btn"
+      onclick={handleSort}
+      disabled={getSelectedPaths().length === 0 || getRules().length === 0 || getSortStatus() === 'sorting'}
+    >
+      {getSortStatus() === 'sorting' ? 'Sorting…' : 'Sort Now'}
     </button>
   </div>
 </div>
@@ -334,6 +449,42 @@
   .sort-toggle:hover {
     border-color: var(--border-hover);
     color: var(--text);
+  }
+
+  .view-switch {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+
+  .view-switch button {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-family: inherit;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .view-switch button:hover {
+    color: var(--text);
+  }
+
+  .view-switch button.active {
+    background: var(--accent);
+    color: white;
+  }
+
+  .view-switch-count {
+    font-size: 10px;
+    font-weight: 600;
+    opacity: 0.75;
   }
 
   .clear-btn {
@@ -469,6 +620,101 @@
 
   .remove-path:hover {
     color: var(--danger);
+  }
+
+  .preview-empty {
+    text-align: center;
+    color: var(--text-muted);
+    user-select: none;
+    margin: auto;
+  }
+
+  .preview-empty p {
+    margin: 2px 0;
+    font-size: 14px;
+  }
+
+  .preview-empty .hint {
+    font-size: 12px;
+    opacity: 0.6;
+  }
+
+  .preview-error {
+    color: var(--danger);
+  }
+
+  .preview-list {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: opacity 0.15s;
+  }
+
+  .preview-list.stale {
+    opacity: 0.5;
+  }
+
+  .preview-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .preview-folder {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .preview-folder-name {
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .preview-folder-count {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--surface-3);
+    border-radius: 8px;
+    padding: 1px 6px;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .preview-file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px 4px 26px;
+    border-left: 1px solid var(--border);
+    margin-left: 13px;
+  }
+
+  .preview-name {
+    font-size: 12px;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .preview-note {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    border: 1px solid var(--border-hover);
+    border-radius: 8px;
+    padding: 0 6px;
+    flex-shrink: 0;
   }
 
   .drop-zone-actions {

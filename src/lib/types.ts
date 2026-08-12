@@ -17,3 +17,10 @@ export interface SortResult {
   operations: FileOperation[];
   errors: string[];
 }
+
+/** One file's resolved destination, computed without touching the filesystem. */
+export interface PreviewEntry {
+  original_path: string;
+  new_path: string;
+  matched_rule_ids: number[];
+}

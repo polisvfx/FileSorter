@@ -1,31 +1,36 @@
-import type { Rule } from '$lib/types';
-
+/** Last path segment of a Windows or POSIX path. */
 export function getFilename(path: string): string {
   const normalized = path.replace(/\\/g, '/');
-  return normalized.substring(normalized.lastIndexOf('/') + 1).toLowerCase();
+  return normalized.substring(normalized.lastIndexOf('/') + 1);
 }
 
-/// Evaluate a Contains/Contains-NOT expression against a (lowercased) filename.
-/// "," is OR, "*" is AND, and AND binds tighter than OR: `a,b*c` means `a OR (b AND c)`.
-function matchesExpr(filenameLower: string, expr: string): boolean {
-  let anyGroup = false;
-  for (const group of expr.split(',')) {
-    const terms = group
-      .split('*')
-      .map((t) => t.trim().toLowerCase())
-      .filter((t) => t.length > 0);
-    if (terms.length === 0) continue;
-    anyGroup = true;
-    if (terms.every((t) => filenameLower.includes(t))) return true;
+/** Directory portion of a path, normalized to forward slashes. */
+export function getDirname(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  const lastSlash = normalized.lastIndexOf('/');
+  return lastSlash >= 0 ? normalized.substring(0, lastSlash) : '';
+}
+
+/** Longest directory path shared by every input, compared segment by segment. */
+export function commonDirPrefix(dirs: string[]): string {
+  if (dirs.length === 0) return '';
+  let parts = dirs[0].split('/');
+  for (const dir of dirs.slice(1)) {
+    const other = dir.split('/');
+    let i = 0;
+    while (i < parts.length && i < other.length && parts[i] === other[i]) i++;
+    parts = parts.slice(0, i);
   }
-  return !anyGroup;
+  return parts.join('/');
 }
 
-export function ruleMatchesFile(rule: Rule, filename: string): boolean {
-  const contains = rule.contains.trim();
-  if (!contains) return false;
-  if (!matchesExpr(filename, rule.contains)) return false;
-  const containsNot = rule.contains_not?.trim();
-  if (containsNot && matchesExpr(filename, containsNot)) return false;
-  return true;
+/**
+ * True when a Contains expression has at least one searchable term.
+ *
+ * Mirrors `parse_expr` in sort.rs: an expression of bare operators (`*`,
+ * `,,`) has nothing to match on, so the UI refuses to sort with one rather than
+ * letting it through as a no-op rule.
+ */
+export function hasSearchTerms(expr: string): boolean {
+  return expr.split(',').some((group) => group.split('*').some((term) => term.trim().length > 0));
 }

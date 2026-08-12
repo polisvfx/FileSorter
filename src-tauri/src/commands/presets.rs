@@ -1,6 +1,6 @@
 use crate::models::Rule;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 fn presets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -13,10 +13,26 @@ fn presets_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Preset names become filenames, so reject anything that could escape the
+/// presets directory or is not a usable filename.
+fn preset_path(dir: &Path, name: &str) -> Result<PathBuf, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Preset name cannot be empty".to_string());
+    }
+    if trimmed == "." || trimmed == ".." {
+        return Err("Invalid preset name".to_string());
+    }
+    if trimmed.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) {
+        return Err("Preset name cannot contain / \\ : * ? \" < > |".to_string());
+    }
+    Ok(dir.join(format!("{}.json", trimmed)))
+}
+
 #[tauri::command]
 pub fn save_preset(app: tauri::AppHandle, name: String, rules: Vec<Rule>) -> Result<(), String> {
     let dir = presets_dir(&app)?;
-    let path = dir.join(format!("{}.json", name));
+    let path = preset_path(&dir, &name)?;
     let json = serde_json::to_string_pretty(&rules).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| format!("Failed to save preset: {}", e))
 }
@@ -24,7 +40,7 @@ pub fn save_preset(app: tauri::AppHandle, name: String, rules: Vec<Rule>) -> Res
 #[tauri::command]
 pub fn load_preset(app: tauri::AppHandle, name: String) -> Result<Vec<Rule>, String> {
     let dir = presets_dir(&app)?;
-    let path = dir.join(format!("{}.json", name));
+    let path = preset_path(&dir, &name)?;
     let json = fs::read_to_string(path).map_err(|e| format!("Failed to load preset: {}", e))?;
     serde_json::from_str(&json).map_err(|e| format!("Failed to parse preset: {}", e))
 }
@@ -48,6 +64,6 @@ pub fn list_presets(app: tauri::AppHandle) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub fn delete_preset(app: tauri::AppHandle, name: String) -> Result<(), String> {
     let dir = presets_dir(&app)?;
-    let path = dir.join(format!("{}.json", name));
+    let path = preset_path(&dir, &name)?;
     fs::remove_file(path).map_err(|e| format!("Failed to delete preset: {}", e))
 }

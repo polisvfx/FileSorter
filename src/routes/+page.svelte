@@ -12,6 +12,7 @@
   const LEFT_PANEL_MIN = 280;
   const RIGHT_PANEL_MIN = 300;
   const DIVIDER_KEY = 'filesorter-divider-width';
+  const SAVE_DEBOUNCE_MS = 200;
 
   let initialized = false;
   let leftPanelWidth = $state(LEFT_PANEL_DEFAULT);
@@ -39,16 +40,19 @@
     initialized = true;
   });
 
+  // Debounced: the selected-path list can hold every file under a dropped folder,
+  // and this used to re-serialize the whole thing on every keystroke in a rule.
   $effect(() => {
     const state = {
-      rules: getRules(),
+      rules: getRules().map((r) => ({ ...r })),
       outputDir: getOutputDir(),
       copyMode: getCopyMode(),
-      selectedPaths: getSelectedPaths()
+      selectedPaths: getSelectedPaths().slice()
     };
-    if (initialized) {
-      saveSession(state);
-    }
+    if (!initialized) return;
+
+    const timer = setTimeout(() => saveSession(state), SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
   });
 
   $effect(() => {

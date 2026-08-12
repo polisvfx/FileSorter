@@ -1,17 +1,26 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
+  import { listen } from '@tauri-apps/api/event';
   import { open } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
-  import { getSelectedPaths, addPaths, removePath, clearPaths, setPaths } from '$lib/stores/app.svelte';
+  import {
+    getRoots,
+    getRootPaths,
+    getTotalFileCount,
+    addPaths,
+    removePath,
+    clearPaths,
+    refreshRoots
+  } from '$lib/stores/app.svelte';
   import { getRules } from '$lib/stores/rules.svelte';
-  import { setSortStatus, getSortStatus, setStatusMessage, setCanUndo, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
+  import { setSortStatus, getSortStatus, setStatusMessage, setCanUndo, getOutputDir, setOutputDir, getCopyMode, setCopyMode, setProgress } from '$lib/stores/app.svelte';
   import {
     requestPreview,
     getPreviewEntries,
     getPreviewError,
     isPreviewPending,
-    getMatchCountForPath
+    getMatchCountUnder
   } from '$lib/stores/preview.svelte';
   import type { SortResult } from '$lib/types';
   import { getFilename, getDirname, commonDirPrefix, hasSearchTerms } from '$lib/utils';
@@ -27,19 +36,19 @@
   // Reading each field explicitly is what registers the dependency, so editing a
   // rule's text re-runs the preview rather than only adding/removing rules.
   $effect(() => {
-    const paths = getSelectedPaths().slice();
+    const paths = getRootPaths();
     const rules = getRules().map((r) => ({ ...r }));
     requestPreview(paths, rules, getOutputDir());
   });
 
-  let sortedPaths = $derived.by(() => {
-    const paths = getSelectedPaths();
-    if (sortMode === 'none') return paths;
-    return [...paths].sort((a, b) => {
+  let sortedRoots = $derived.by(() => {
+    const list = getRoots();
+    if (sortMode === 'none') return list;
+    return [...list].sort((a, b) => {
       if (sortMode === 'name') {
-        return getFilename(a).localeCompare(getFilename(b));
+        return getFilename(a.path).localeCompare(getFilename(b.path));
       }
-      return getMatchCountForPath(b) - getMatchCountForPath(a);
+      return getMatchCountUnder(b.path) - getMatchCountUnder(a.path);
     });
   });
 
@@ -76,9 +85,19 @@
   });
 
   onMount(() => {
-    // OS drag-and-drop only exists inside the Tauri shell. Guard it so opening the
-    // frontend in a plain browser (`npm run dev` on its own) doesn't throw during
-    // the effect flush, which takes the whole app down with it.
+    // OS drag-and-drop and the progress stream only exist inside the Tauri shell.
+    // Guard them so opening the frontend in a plain browser (`npm run dev` on its
+    // own) doesn't throw during the effect flush and take the whole app down.
+    let unlistenProgress: Promise<() => void> | null = null;
+    try {
+      unlistenProgress = listen<{ processed: number; total: number; current: string }>(
+        'sort://progress',
+        (event) => setProgress(event.payload)
+      );
+    } catch {
+      // not running under Tauri
+    }
+
     let unlisten: Promise<() => void> | null = null;
     try {
       unlisten = getCurrentWebview().onDragDropEvent((event) => {
@@ -94,11 +113,12 @@
         }
       });
     } catch {
-      return;
+      // not running under Tauri
     }
 
     return () => {
       unlisten?.then((fn) => fn());
+      unlistenProgress?.then((fn) => fn());
     };
   });
 
@@ -171,7 +191,7 @@
   }
 
   async function handleSort() {
-    const paths = getSelectedPaths();
+    const paths = getRootPaths();
     const rules = getRules();
     const copyMode = getCopyMode();
 
@@ -208,6 +228,7 @@
     }
 
     setSortStatus('sorting');
+    setProgress({ processed: 0, total: getTotalFileCount(), current: '' });
     setStatusMessage(copyMode ? 'Copying files...' : 'Sorting files...');
 
     const verb = copyMode ? 'Copied' : 'Moved';
@@ -220,24 +241,39 @@
         copyMode
       });
 
-      // Moved files live somewhere else now — keep the list pointing at them so a
-      // second sort isn't a silent no-op against paths that no longer exist.
+      // Files moved out from under the roots — for a dropped folder the root is
+      // unchanged, but a dropped single file now lives somewhere else.
       if (!copyMode && result.operations.length > 0) {
         const moved = new Map(result.operations.map((op) => [op.original_path, op.new_path]));
-        setPaths(paths.map((p) => moved.get(p) ?? p));
+        await refreshRoots(moved);
       }
 
-      if (result.errors.length > 0) {
+      const count = result.operations.length;
+      if (result.cancelled) {
+        setSortStatus('idle');
+        setStatusMessage(`Cancelled — ${verb.toLowerCase()} ${count} file(s) before stopping.`);
+      } else if (result.errors.length > 0) {
         setSortStatus('error');
-        setStatusMessage(`Done with ${result.errors.length} error(s). ${verb} ${result.operations.length} file(s).`);
+        setStatusMessage(`Done with ${result.errors.length} error(s). ${verb} ${count} file(s).`);
       } else {
         setSortStatus('done');
-        setStatusMessage(`${verb} ${result.operations.length} file(s) successfully.`);
+        setStatusMessage(`${verb} ${count} file(s) successfully.`);
       }
-      setCanUndo(result.operations.length > 0);
+      setCanUndo(count > 0);
     } catch (err) {
       setSortStatus('error');
       setStatusMessage(`Error: ${err}`);
+    } finally {
+      setProgress(null);
+    }
+  }
+
+  async function handleCancel() {
+    setStatusMessage('Stopping…');
+    try {
+      await invoke('cancel_sort');
+    } catch (err) {
+      setStatusMessage(`Could not cancel: ${err}`);
     }
   }
 
@@ -273,12 +309,12 @@
           {sortMode === 'none' ? 'Unsorted' : sortMode === 'name' ? 'By Name' : 'By Rules'}
         </button>
       {/if}
-      {#if getSelectedPaths().length > 0}
+      {#if getRoots().length > 0}
         <button class="clear-btn" onclick={clearPaths} title="Clear all">
           Clear
         </button>
       {/if}
-      <span class="path-count">{getSelectedPaths().length} selected</span>
+      <span class="path-count">{getTotalFileCount().toLocaleString()} files</span>
     </div>
   </div>
 
@@ -287,13 +323,13 @@
   <div
     class="drop-area"
     class:drag-over={dragOver}
-    class:has-items={getSelectedPaths().length > 0}
+    class:has-items={getRoots().length > 0}
     ondragover={handleDragOver}
     ondragleave={handleDragLeave}
     ondrop={handleDrop}
-    onclick={getSelectedPaths().length === 0 ? handleBrowse : undefined}
+    onclick={getRoots().length === 0 ? handleBrowse : undefined}
   >
-    {#if getSelectedPaths().length === 0}
+    {#if getRoots().length === 0}
       <div class="drop-placeholder">
         <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
           <rect x="4" y="8" width="32" height="26" rx="3" stroke="currentColor" stroke-width="2"/>
@@ -305,13 +341,24 @@
       </div>
     {:else if viewMode === 'files'}
       <div class="path-list">
-        {#each sortedPaths as path}
-          <div class="path-item" class:has-rules={getMatchCountForPath(path) > 0}>
-            <span class="path-text" title={path}>{shortenPath(path)}</span>
-            {#if getMatchCountForPath(path) > 0}
-              <span class="rule-badge" title="{getMatchCountForPath(path)} rule(s) match">{getMatchCountForPath(path)}</span>
+        {#each sortedRoots as root (root.path)}
+          <div class="path-item" class:has-rules={getMatchCountUnder(root.path) > 0}>
+            {#if root.is_dir}
+              <svg class="path-icon" width="13" height="13" viewBox="0 0 14 14" fill="none">
+                <rect x="1" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M1 5.5L1 3.5C1 2.67 1.67 2 2.5 2H5.5L7 4H11.5C12.33 4 13 4.67 13 5.5" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
             {/if}
-            <button class="remove-path" onclick={() => removePath(path)} title="Remove">
+            <span class="path-text" title={root.path}>{shortenPath(root.path)}</span>
+            {#if root.is_dir}
+              <span class="path-meta">{root.file_count.toLocaleString()} files</span>
+            {/if}
+            {#if getMatchCountUnder(root.path) > 0}
+              <span class="rule-badge" title="{getMatchCountUnder(root.path)} file(s) would move">
+                {getMatchCountUnder(root.path).toLocaleString()}
+              </span>
+            {/if}
+            <button class="remove-path" onclick={() => removePath(root.path)} title="Remove">
               <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
                 <path d="M2 2L12 12M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
               </svg>
@@ -394,10 +441,13 @@
       <input type="checkbox" checked={getCopyMode()} onchange={(e) => setCopyMode(e.currentTarget.checked)} />
       <span>Copy</span>
     </label>
+    {#if getSortStatus() === 'sorting'}
+      <button class="cancel-btn" onclick={handleCancel}>Cancel</button>
+    {/if}
     <button
       class="sort-btn"
       onclick={handleSort}
-      disabled={getSelectedPaths().length === 0 || getRules().length === 0 || getSortStatus() === 'sorting'}
+      disabled={getRoots().length === 0 || getRules().length === 0 || getSortStatus() === 'sorting'}
     >
       {getSortStatus() === 'sorting' ? 'Sorting…' : 'Sort Now'}
     </button>
@@ -589,6 +639,41 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     flex: 1;
+  }
+
+  .path-icon {
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-right: 6px;
+  }
+
+  .path-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-left: 8px;
+  }
+
+  .cancel-btn {
+    padding: 8px 16px;
+    background: var(--surface-2);
+    border: 1px solid var(--danger);
+    border-radius: 7px;
+    color: var(--danger);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    margin-left: auto;
+    transition: background 0.15s;
+  }
+
+  .cancel-btn:hover {
+    background: rgba(255, 59, 48, 0.12);
+  }
+
+  .cancel-btn + .sort-btn {
+    margin-left: 0;
   }
 
   .rule-badge {

@@ -9,8 +9,16 @@
     getCanUndo,
     setCanUndo,
     setStatusMessage,
-    setSortStatus
+    setSortStatus,
+    getProgress
   } from '$lib/stores/app.svelte';
+  import { getFilename } from '$lib/utils';
+
+  let percent = $derived.by(() => {
+    const p = getProgress();
+    if (!p || p.total === 0) return 0;
+    return Math.min(100, Math.round((p.processed / p.total) * 100));
+  });
 
   const RELEASES_URL = 'https://github.com/polisvfx/FileSorter/releases';
 
@@ -47,6 +55,20 @@
       <span class="status-icon error">!</span>
     {/if}
     <span class="status-text">{getStatusMessage() || 'Ready'}</span>
+    {#if getSortStatus() === 'sorting' && getProgress()}
+      {@const p = getProgress()!}
+      <div class="progress" title={p.current}>
+        <div class="progress-track">
+          <div class="progress-fill" style="width: {percent}%"></div>
+        </div>
+        <span class="progress-count">
+          {p.processed.toLocaleString()} / {p.total.toLocaleString()}
+        </span>
+      </div>
+      {#if p.current}
+        <span class="progress-current">{getFilename(p.current)}</span>
+      {/if}
+    {/if}
   </div>
 
   <div class="status-right">
@@ -79,6 +101,47 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .progress-track {
+    width: 140px;
+    height: 4px;
+    background: var(--surface-3);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width 0.12s linear;
+  }
+
+  .progress-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .progress-current {
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0.7;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 
   .status-text {

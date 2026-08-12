@@ -187,18 +187,60 @@ pub(crate) fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Execute sorting rules on the given paths.
+/// How far along a sort is. Reported per file so the UI can show real progress
+/// instead of an indeterminate spinner.
+#[derive(Debug, Clone)]
+pub struct SortProgress<'a> {
+    pub processed: usize,
+    pub total: usize,
+    pub current: &'a Path,
+}
+
+/// Sort without progress or cancellation. Production always goes through
+/// [`execute_sort_with`]; this keeps the hook-free call short in tests.
+#[cfg(test)]
 pub fn execute_sort(
     roots: Vec<PathBuf>,
     rules: &[Rule],
     output_dir: Option<PathBuf>,
     copy_mode: bool,
 ) -> SortResult {
+    execute_sort_with(roots, rules, output_dir, copy_mode, &mut |_| {}, &|| false)
+}
+
+/// Execute sorting rules, reporting progress and honouring cancellation.
+///
+/// The hooks are plain closures rather than Tauri types so the engine stays
+/// testable on its own. Cancelling stops before the next file: everything already
+/// moved is still recorded, so undo can reverse a cancelled run.
+pub fn execute_sort_with(
+    roots: Vec<PathBuf>,
+    rules: &[Rule],
+    output_dir: Option<PathBuf>,
+    copy_mode: bool,
+    on_progress: &mut dyn FnMut(SortProgress),
+    is_cancelled: &dyn Fn() -> bool,
+) -> SortResult {
     let mut operations = Vec::new();
     let mut errors = Vec::new();
     let mut claimed: HashSet<PathBuf> = HashSet::new();
+    let mut cancelled = false;
 
-    for file_path in collect_files(&roots) {
+    let files = collect_files(&roots);
+    let total = files.len();
+
+    for (index, file_path) in files.into_iter().enumerate() {
+        if is_cancelled() {
+            cancelled = true;
+            break;
+        }
+
+        on_progress(SortProgress {
+            processed: index,
+            total,
+            current: &file_path,
+        });
+
         let Some((dest, _)) = resolve_destination(&file_path, rules, output_dir.as_deref()) else {
             continue;
         };
@@ -243,7 +285,19 @@ pub fn execute_sort(
         }
     }
 
-    SortResult { operations, errors }
+    if !cancelled {
+        on_progress(SortProgress {
+            processed: total,
+            total,
+            current: Path::new(""),
+        });
+    }
+
+    SortResult {
+        operations,
+        errors,
+        cancelled,
+    }
 }
 
 #[cfg(test)]
@@ -537,6 +591,68 @@ mod tests {
         assert!(src.join("invoice_2024.pdf").exists(), "original must remain");
         assert!(src.join("Invoices/invoice_2024.pdf").exists());
         assert!(result.operations[0].copied);
+    }
+
+    // --- progress and cancellation -----------------------------------------
+
+    #[test]
+    fn reports_progress_up_to_the_total() {
+        let dir = tempdir().unwrap();
+        for name in ["a_report.txt", "b_report.txt", "c_report.txt"] {
+            write_file(dir.path(), name);
+        }
+        let rules = vec![rule(1, "report", "Reports")];
+
+        let mut seen: Vec<(usize, usize)> = Vec::new();
+        let result = execute_sort_with(
+            vec![dir.path().to_path_buf()],
+            &rules,
+            None,
+            false,
+            &mut |p| seen.push((p.processed, p.total)),
+            &|| false,
+        );
+
+        assert!(!result.cancelled);
+        assert_eq!(result.operations.len(), 3);
+        assert!(seen.iter().all(|(_, total)| *total == 3));
+        assert_eq!(seen.first().unwrap().0, 0);
+        assert_eq!(seen.last().unwrap().0, 3, "must report reaching the total");
+    }
+
+    #[test]
+    fn cancelling_stops_early_but_keeps_what_already_moved() {
+        let dir = tempdir().unwrap();
+        for name in ["a_report.txt", "b_report.txt", "c_report.txt"] {
+            write_file(dir.path(), name);
+        }
+        let rules = vec![rule(1, "report", "Reports")];
+
+        // Let two files through, then cancel.
+        let checks = std::cell::Cell::new(0usize);
+        let result = execute_sort_with(
+            vec![dir.path().to_path_buf()],
+            &rules,
+            None,
+            false,
+            &mut |_| {},
+            &|| {
+                let n = checks.get();
+                checks.set(n + 1);
+                n >= 2
+            },
+        );
+
+        assert!(result.cancelled, "result must record that it was cancelled");
+        assert_eq!(
+            result.operations.len(),
+            2,
+            "files moved before the cancel stay undoable"
+        );
+        assert_eq!(
+            fs::read_dir(dir.path().join("Reports")).unwrap().count(),
+            2
+        );
     }
 
     /// `fs::rename` cannot cross volumes, so moves fall back to copy+delete.

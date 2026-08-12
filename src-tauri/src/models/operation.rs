@@ -12,4 +12,8 @@ pub struct FileOperation {
 pub struct SortResult {
     pub operations: Vec<FileOperation>,
     pub errors: Vec<String>,
+    /// True when the user stopped the run early. Files already moved are still
+    /// listed in `operations` so undo can reverse them.
+    #[serde(default)]
+    pub cancelled: bool,
 }

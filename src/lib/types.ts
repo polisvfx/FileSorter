@@ -16,6 +16,15 @@ export interface FileOperation {
 export interface SortResult {
   operations: FileOperation[];
   errors: string[];
+  /** True when the user stopped the run early; moved files are still undoable. */
+  cancelled: boolean;
+}
+
+/** A dropped file or folder, kept unexpanded. */
+export interface PathInfo {
+  path: string;
+  is_dir: boolean;
+  file_count: number;
 }
 
 /** One file's resolved destination, computed without touching the filesystem. */

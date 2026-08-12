@@ -2,6 +2,7 @@ mod commands;
 mod models;
 
 use commands::presets;
+use commands::preview;
 use commands::resolve;
 use commands::sort::execute_sort;
 use commands::undo::{self, UndoState};
@@ -18,11 +19,12 @@ fn sort_files(
 ) -> Result<SortResult, String> {
     let root_paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     let out_path = output_dir.map(PathBuf::from);
-    let result = execute_sort(root_paths, &rules, out_path, copy_mode);
+    let result = execute_sort(root_paths, &rules, out_path.clone(), copy_mode);
 
-    // Store operations for undo
-    let mut ops = state.operations.lock().map_err(|e| e.to_string())?;
-    *ops = result.operations.clone();
+    // Store operations for undo, along with the output dir that bounds cleanup.
+    let mut record = state.inner.lock().map_err(|e| e.to_string())?;
+    record.operations = result.operations.clone();
+    record.output_dir = out_path;
 
     Ok(result)
 }
@@ -36,6 +38,7 @@ pub fn run() {
         .manage(UndoState::new())
         .invoke_handler(tauri::generate_handler![
             sort_files,
+            preview::preview_sort,
             resolve::resolve_paths,
             presets::save_preset,
             presets::load_preset,

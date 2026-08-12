@@ -31,6 +31,9 @@
   async function handleSave() {
     const name = newPresetName.trim();
     if (!name) return;
+    if (presets.includes(name) && !confirm(`Preset "${name}" already exists. Overwrite it?`)) {
+      return;
+    }
     try {
       await invoke('save_preset', { name, rules: getRules() });
       showSaveInput = false;

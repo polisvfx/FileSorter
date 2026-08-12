@@ -18,7 +18,7 @@ FileSorter uses an ordered list of rules to sort files into folders. Each rule h
 | **Enabled** | Yes (default on) | Untick to skip this rule during sorting without deleting it |
 | **Stop on Match** | No (default off) | When a file matches this rule, skip all later rules for that file |
 
-Rules execute **top-to-bottom in order**. Each rule walks the entire directory tree recursively, so Rule 2 sees the filesystem *after* Rule 1 has already moved files. This lets you build intricate nested folder structures in a single pass.
+Rules execute **top-to-bottom in order**, and each matching rule adds one folder level, so rules compose into nested structures in a single pass. Setting an output directory changes where the tree is rooted, not how it nests.
 
 ### Contains / Contains NOT operators
 
@@ -99,6 +99,7 @@ SmartScreen will show "Windows protected your PC":
 
 ## Features
 
+- **Dry-run preview** — switch the right panel to **Preview** to see exactly where every file will land, grouped by destination folder, before anything moves. Conflict suffixes are simulated too, so the names shown are the names you get
 - **Drag-and-drop rule reordering** — drag rules to change execution order
 - **Enable/disable rules** — toggle a rule off without losing its configuration
 - **Stop on Match** — mark a rule as final so matching files skip all later rules

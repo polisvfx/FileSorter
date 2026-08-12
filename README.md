@@ -103,7 +103,8 @@ SmartScreen will show "Windows protected your PC":
 - **Drag-and-drop rule reordering** — drag rules to change execution order
 - **Enable/disable rules** — toggle a rule off without losing its configuration
 - **Stop on Match** — mark a rule as final so matching files skip all later rules
-- **File & folder input** — drop files/folders from your OS file browser or use the native browse dialog
+- **Live progress with cancel** — a progress bar counts files as they move, and Cancel stops the run cleanly; anything already moved stays undoable
+- **File & folder input** — drop files/folders from your OS file browser or use the native browse dialog. Dropped folders stay collapsed to a single row showing their file count, so a 50,000-file folder is one entry rather than 50,000
 - **Saveable presets** — save and load rule configurations for different workflows
 - **Undo** — reverse the last sort operation, restoring all files to their original locations
 - **Filename conflict handling** — appends `(1)`, `(2)`, etc. when a file with the same name already exists in the target folder

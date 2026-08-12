@@ -4,7 +4,7 @@
   import RuleList from '$lib/components/RuleList.svelte';
   import DropZone from '$lib/components/DropZone.svelte';
   import StatusBar from '$lib/components/StatusBar.svelte';
-  import { getSelectedPaths, setPaths, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
+  import { getRootPaths, setPaths, getOutputDir, setOutputDir, getCopyMode, setCopyMode } from '$lib/stores/app.svelte';
   import { getRules, setRules } from '$lib/stores/rules.svelte';
   import { loadSession, saveSession } from '$lib/stores/persistence';
 
@@ -47,7 +47,7 @@
       rules: getRules().map((r) => ({ ...r })),
       outputDir: getOutputDir(),
       copyMode: getCopyMode(),
-      selectedPaths: getSelectedPaths().slice()
+      selectedPaths: getRootPaths()
     };
     if (!initialized) return;
 

@@ -1,36 +1,61 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { PathInfo } from '$lib/types';
 
-let selectedPaths = $state<string[]>([]);
+/**
+ * The roots the user dropped or picked — files and folders as-is.
+ *
+ * Folders are deliberately *not* expanded into one entry per file: doing so put
+ * tens of thousands of rows into the UI list and into the persisted session.
+ * The Rust side walks them when it actually needs the files.
+ */
+let roots = $state<PathInfo[]>([]);
 let sortStatus = $state<'idle' | 'sorting' | 'done' | 'error'>('idle');
 let statusMessage = $state('');
 let canUndo = $state(false);
 let outputDir = $state<string | null>(null);
 let copyMode = $state(false);
+let progress = $state<{ processed: number; total: number; current: string } | null>(null);
 
-export function getSelectedPaths(): string[] {
-  return selectedPaths;
+export function getRoots(): PathInfo[] {
+  return roots;
+}
+
+export function getRootPaths(): string[] {
+  return roots.map((r) => r.path);
+}
+
+/** Total files across every root — what a sort would actually walk. */
+export function getTotalFileCount(): number {
+  return roots.reduce((sum, r) => sum + r.file_count, 0);
 }
 
 export async function addPaths(paths: string[]) {
-  const resolved = await invoke<string[]>('resolve_paths', { paths });
-  const existing = new Set(selectedPaths);
-  for (const p of resolved) {
-    if (!existing.has(p)) {
-      selectedPaths.push(p);
-    }
-  }
+  const existing = new Set(roots.map((r) => r.path));
+  const fresh = paths.filter((p) => !existing.has(p));
+  if (fresh.length === 0) return;
+
+  const infos = await invoke<PathInfo[]>('inspect_paths', { paths: fresh });
+  roots = [...roots, ...infos];
 }
 
-export function setPaths(paths: string[]) {
-  selectedPaths = paths;
+/** Re-describe the current roots, optionally remapping paths that moved. */
+export async function refreshRoots(remap?: Map<string, string>) {
+  if (roots.length === 0) return;
+  const paths = roots.map((r) => remap?.get(r.path) ?? r.path);
+  roots = await invoke<PathInfo[]>('inspect_paths', { paths });
+}
+
+/** Replace the roots wholesale (session restore). Drops anything that's gone. */
+export async function setPaths(paths: string[]) {
+  roots = paths.length > 0 ? await invoke<PathInfo[]>('inspect_paths', { paths }) : [];
 }
 
 export function removePath(path: string) {
-  selectedPaths = selectedPaths.filter((p) => p !== path);
+  roots = roots.filter((r) => r.path !== path);
 }
 
 export function clearPaths() {
-  selectedPaths = [];
+  roots = [];
 }
 
 export function getSortStatus() {
@@ -71,4 +96,12 @@ export function getCopyMode(): boolean {
 
 export function setCopyMode(value: boolean) {
   copyMode = value;
+}
+
+export function getProgress() {
+  return progress;
+}
+
+export function setProgress(value: { processed: number; total: number; current: string } | null) {
+  progress = value;
 }

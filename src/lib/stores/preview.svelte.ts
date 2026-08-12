@@ -16,21 +16,23 @@ let runToken = 0;
 // identity check is enough, and reading it here registers the dependency in
 // whichever component effect calls through.
 let countedEntries: PreviewEntry[] | null = null;
-let matchCountByPath = new Map<string, number>();
 let matchCountByRule = new Map<number, number>();
+let normalizedOriginals: string[] = [];
+
+const normalize = (p: string) => p.replace(/\\/g, '/');
 
 function ensureCounts() {
   const current = entries;
   if (countedEntries === current) return;
   countedEntries = current;
 
-  matchCountByPath = new Map(current.map((e) => [e.original_path, e.matched_rule_ids.length]));
   matchCountByRule = new Map();
   for (const entry of current) {
     for (const id of entry.matched_rule_ids) {
       matchCountByRule.set(id, (matchCountByRule.get(id) ?? 0) + 1);
     }
   }
+  normalizedOriginals = current.map((e) => normalize(e.original_path));
 }
 
 export function getPreviewEntries(): PreviewEntry[] {
@@ -45,10 +47,19 @@ export function isPreviewPending(): boolean {
   return pending;
 }
 
-/** How many rules would act on this file, honouring enabled and stop-on-match. */
-export function getMatchCountForPath(path: string): number {
+/**
+ * How many files under this root would move. For a dropped folder that's the
+ * count across its whole tree; for a single file it's 0 or 1.
+ */
+export function getMatchCountUnder(root: string): number {
   ensureCounts();
-  return matchCountByPath.get(path) ?? 0;
+  const prefix = normalize(root);
+  const nested = prefix.endsWith('/') ? prefix : prefix + '/';
+  let count = 0;
+  for (const original of normalizedOriginals) {
+    if (original === prefix || original.startsWith(nested)) count++;
+  }
+  return count;
 }
 
 /** How many files this rule would actually claim during a real sort. */

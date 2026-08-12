@@ -760,8 +760,10 @@ dependencies = [
 
 [[package]]
 name = "filesorter"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
+ "chrono",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

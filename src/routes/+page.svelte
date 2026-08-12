@@ -8,9 +8,13 @@
   import { getRules, setRules } from '$lib/stores/rules.svelte';
   import { loadSession, saveSession } from '$lib/stores/persistence';
 
-  const LEFT_PANEL_DEFAULT = 480;
-  const LEFT_PANEL_MIN = 280;
-  const RIGHT_PANEL_MIN = 300;
+  // Measured against a rule row carrying every control (fields, scope, mode
+  // toggles, stop/duplicate/delete): below 659px the row starts clipping, so the
+  // minimum is set just above that and the default leaves the text fields room.
+  const LEFT_PANEL_DEFAULT = 720;
+  const LEFT_PANEL_MIN = 660;
+  // Enough for the action row with Cancel showing mid-sort.
+  const RIGHT_PANEL_MIN = 520;
   const DIVIDER_KEY = 'filesorter-divider-width';
   const SAVE_DEBOUNCE_MS = 200;
 
@@ -21,9 +25,8 @@
   onMount(() => {
     const session = loadSession();
     if (session) {
-      if (session.rules?.length) {
-        setRules(session.rules.map((r) => ({ ...r, enabled: r.enabled ?? true })));
-      }
+      // setRules fills in fields added since the session was written.
+      if (session.rules?.length) setRules(session.rules);
       if (session.outputDir) setOutputDir(session.outputDir);
       if (session.copyMode) setCopyMode(session.copyMode);
       if (session.selectedPaths?.length) setPaths(session.selectedPaths);
@@ -134,7 +137,7 @@
   }
 
   .left-panel {
-    min-width: 280px;
+    min-width: 660px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -165,7 +168,7 @@
 
   .right-panel {
     flex: 1;
-    min-width: 300px;
+    min-width: 520px;
     display: flex;
     flex-direction: column;
   }

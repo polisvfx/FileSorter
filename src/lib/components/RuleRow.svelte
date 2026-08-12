@@ -1,13 +1,22 @@
 <script lang="ts">
   import type { Rule } from '$lib/types';
-  import { updateRule, removeRule } from '$lib/stores/rules.svelte';
-  import { getMatchCountForRule } from '$lib/stores/preview.svelte';
+  import type { MatchScope } from '$lib/types';
+  import { updateRule, removeRule, duplicateRule } from '$lib/stores/rules.svelte';
+  import { getMatchCountForRule, getRuleError } from '$lib/stores/preview.svelte';
 
   let { rule, index }: { rule: Rule; index: number } = $props();
 
   // Counted from the preview, so this reflects what the rule actually claims —
   // disabled rules and files taken by an earlier stop-on-match rule don't count.
   let matchCount = $derived(getMatchCountForRule(rule.id));
+  let ruleError = $derived(getRuleError(rule.id));
+
+  const SCOPES: { value: MatchScope; label: string; title: string }[] = [
+    { value: 'name', label: 'Name', title: 'Match the filename including its extension' },
+    { value: 'stem', label: 'Stem', title: 'Match the filename without its extension' },
+    { value: 'extension', label: 'Ext', title: 'Match only the extension, without the dot' },
+    { value: 'path', label: 'Path', title: 'Match the full path, including parent folders' }
+  ];
 </script>
 
 <div class="rule-row" class:disabled={!rule.enabled}>
@@ -55,9 +64,42 @@
         type="text"
         value={rule.target_folder}
         placeholder={rule.contains.trim() || 'e.g. Invoices'}
+        title="Supports tokens: {'{ext}'} {'{stem}'} {'{name}'} {'{YYYY}'} {'{MM}'} {'{DD}'}, and $1..$9 for regex captures"
         oninput={(e) => updateRule(rule.id, 'target_folder', (e.target as HTMLInputElement).value)}
       />
     </div>
+
+    <div class="field field-scope">
+      <label for="scope-{rule.id}">Match</label>
+      <select
+        id="scope-{rule.id}"
+        value={rule.scope}
+        onchange={(e) => updateRule(rule.id, 'scope', (e.target as HTMLSelectElement).value)}
+      >
+        {#each SCOPES as s}
+          <option value={s.value} title={s.title}>{s.label}</option>
+        {/each}
+      </select>
+    </div>
+  </div>
+
+  <div class="mode-toggles">
+    <button
+      class="mode-toggle"
+      class:on={rule.case_sensitive}
+      aria-pressed={rule.case_sensitive}
+      onclick={() => updateRule(rule.id, 'case_sensitive', !rule.case_sensitive)}
+      title={rule.case_sensitive ? 'Case sensitive' : 'Case insensitive'}
+    >Aa</button>
+    <button
+      class="mode-toggle"
+      class:on={rule.regex}
+      aria-pressed={rule.regex}
+      onclick={() => updateRule(rule.id, 'regex', !rule.regex)}
+      title={rule.regex
+        ? 'Regex mode — Contains is a regular expression'
+        : 'Plain text mode — , means OR and * means AND'}
+    >.*</button>
   </div>
 
   {#if matchCount > 0}
@@ -81,12 +123,23 @@
     {/if}
   </button>
 
+  <button class="icon-btn" onclick={() => duplicateRule(rule.id)} title="Duplicate rule">
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <rect x="1.5" y="1.5" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+      <path d="M4.5 12.5H12C12.28 12.5 12.5 12.28 12.5 12V4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+    </svg>
+  </button>
+
   <button class="delete-btn" onclick={() => removeRule(rule.id)} title="Remove rule">
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
       <path d="M2 2L12 12M12 2L2 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
     </svg>
   </button>
 </div>
+
+{#if ruleError}
+  <div class="rule-error" role="alert">Rule {index + 1}: {ruleError}</div>
+{/if}
 
 <style>
   .rule-row {
@@ -165,6 +218,9 @@
     display: flex;
     gap: 8px;
     flex: 1;
+    /* Without this a flex item refuses to shrink below its content width, which
+       pushed the trailing controls off the edge of a narrow panel. */
+    min-width: 0;
   }
 
   .field {
@@ -172,10 +228,101 @@
     flex-direction: column;
     gap: 2px;
     flex: 1;
+    min-width: 0;
   }
 
-  .field:nth-child(2) {
+  .field input {
+    /* Below this the field stops being usable, so the panel gets a scrollbar
+       instead of silently squeezing the text boxes to nothing. */
+    min-width: 104px;
+  }
+
+  .field:nth-child(2),
+  .field:nth-child(2) input {
     flex: 0.7;
+    min-width: 76px;
+  }
+
+  .field-scope {
+    flex: 0 0 auto;
+  }
+
+  .field-scope select {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 4px;
+    font-size: 12px;
+    font-family: inherit;
+    color: var(--text);
+    outline: none;
+    cursor: pointer;
+  }
+
+  .field-scope select:focus {
+    border-color: var(--accent);
+  }
+
+  .mode-toggles {
+    display: flex;
+    gap: 3px;
+    flex-shrink: 0;
+    align-self: flex-end;
+    padding-bottom: 1px;
+  }
+
+  .mode-toggle {
+    width: 26px;
+    height: 27px;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+  }
+
+  .mode-toggle:hover {
+    border-color: var(--border-hover);
+    color: var(--text);
+  }
+
+  .mode-toggle.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  .icon-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: color 0.15s, background 0.15s;
+  }
+
+  .icon-btn:hover {
+    color: var(--accent);
+    background: var(--surface-1);
+  }
+
+  .rule-error {
+    margin: 2px 0 4px 30px;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--danger);
+    background: rgba(255, 59, 48, 0.08);
+    border-left: 2px solid var(--danger);
+    border-radius: 4px;
   }
 
   label {

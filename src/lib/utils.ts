@@ -27,7 +27,7 @@ export function commonDirPrefix(dirs: string[]): string {
 /**
  * True when a Contains expression has at least one searchable term.
  *
- * Mirrors `parse_expr` in sort.rs: an expression of bare operators (`*`,
+ * Mirrors `parse_expr` in matching.rs: an expression of bare operators (`*`,
  * `,,`) has nothing to match on, so the UI refuses to sort with one rather than
  * letting it through as a no-op rule.
  */

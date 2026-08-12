@@ -1,3 +1,6 @@
+use super::matching::{
+    compile_rules, expand_tokens, sanitize_folder_name, scope_text, CompiledRule,
+};
 use crate::models::{FileOperation, Rule, SortResult};
 use std::collections::HashSet;
 use std::fs;
@@ -53,60 +56,10 @@ pub(crate) fn collect_files(roots: &[PathBuf]) -> Vec<PathBuf> {
     files
 }
 
-/// Split a Contains/Contains-NOT expression into its OR groups of AND terms,
-/// dropping empty terms. `a,b*c` becomes `[[a], [b, c]]`.
-fn parse_expr(expr: &str) -> Vec<Vec<String>> {
-    expr.split(',')
-        .map(|group| {
-            group
-                .split('*')
-                .map(|t| t.trim().to_lowercase())
-                .filter(|t| !t.is_empty())
-                .collect::<Vec<String>>()
-        })
-        .filter(|terms| !terms.is_empty())
-        .collect()
-}
-
-/// Evaluate a Contains/Contains-NOT expression against a (lowercased) filename.
-/// "," is OR, "*" is AND, and AND binds tighter than OR: `a,b*c` means `a OR (b AND c)`.
-/// An expression with no searchable terms matches nothing — otherwise a rule of
-/// bare operators would sweep up every file in the tree.
-fn expr_matches(filename_lower: &str, expr: &str) -> bool {
-    parse_expr(expr)
-        .iter()
-        .any(|terms| terms.iter().all(|t| filename_lower.contains(t.as_str())))
-}
-
-/// Check if a file matches a rule (case-insensitive).
-fn matches_rule(filename: &str, rule: &Rule) -> bool {
-    let lower = filename.to_lowercase();
-    if !expr_matches(&lower, &rule.contains) {
-        return false;
-    }
-    if let Some(ref not) = rule.contains_not {
-        if expr_matches(&lower, not) {
-            return false;
-        }
-    }
-    true
-}
-
-/// Turn a Contains expression into a filesystem-safe folder name for the
-/// target-folder auto-fallback, e.g. "invoice*2024" -> "invoice 2024".
-/// Needed because "*" is a reserved character in Windows folder names.
-fn sanitize_folder_name(expr: &str) -> String {
-    expr.split([',', '*'])
-        .map(|t| t.trim())
-        .filter(|t| !t.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 /// Resolve where a file ends up after every rule has been applied, along with the
 /// ids of the rules that matched it. Returns `None` when the file stays put.
 ///
-/// Touches the filesystem only through the caller's conflict resolution, so this
+/// Reads file metadata only when a date token needs it, and never writes, so this
 /// is safe to run for a preview.
 ///
 /// Each matching rule appends one folder segment, and the segments nest. The base
@@ -114,7 +67,7 @@ fn sanitize_folder_name(expr: &str) -> String {
 /// so `16x9` then `30s` yields `16x9/30s/` either way.
 pub(crate) fn resolve_destination(
     file_path: &Path,
-    rules: &[Rule],
+    rules: &[CompiledRule],
     output_dir: Option<&Path>,
 ) -> Option<(PathBuf, Vec<u32>)> {
     let filename = file_path.file_name()?.to_string_lossy().to_string();
@@ -123,17 +76,20 @@ pub(crate) fn resolve_destination(
     let mut matched_rule_ids: Vec<u32> = Vec::new();
 
     for rule in rules {
-        if !rule.enabled || !matches_rule(&filename, rule) {
+        let haystack = scope_text(file_path, rule.scope);
+        let Some(captures) = rule.matches(&haystack) else {
             continue;
-        }
+        };
 
         matched_rule_ids.push(rule.id);
 
-        let effective_folder = if rule.target_folder.trim().is_empty() {
-            sanitize_folder_name(&rule.contains)
+        let template = rule.target_folder.trim();
+        let effective_folder = if template.is_empty() {
+            sanitize_folder_name(&rule.contains_source)
         } else {
-            rule.target_folder.trim().to_string()
+            expand_tokens(template, file_path, captures.as_ref())
         };
+        let effective_folder = effective_folder.trim().to_string();
         if !effective_folder.is_empty() {
             segments.push(effective_folder);
         }
@@ -222,9 +178,16 @@ pub fn execute_sort_with(
     is_cancelled: &dyn Fn() -> bool,
 ) -> SortResult {
     let mut operations = Vec::new();
-    let mut errors = Vec::new();
     let mut claimed: HashSet<PathBuf> = HashSet::new();
     let mut cancelled = false;
+
+    // Compile once rather than per file, and surface any rule that failed rather
+    // than silently dropping it.
+    let (compiled, rule_errors) = compile_rules(rules);
+    let mut errors: Vec<String> = rule_errors
+        .into_iter()
+        .map(|e| format!("Rule {} skipped — invalid pattern. {}", e.rule_id, e.message))
+        .collect();
 
     let files = collect_files(&roots);
     let total = files.len();
@@ -241,7 +204,8 @@ pub fn execute_sort_with(
             current: &file_path,
         });
 
-        let Some((dest, _)) = resolve_destination(&file_path, rules, output_dir.as_deref()) else {
+        let Some((dest, _)) = resolve_destination(&file_path, &compiled, output_dir.as_deref())
+        else {
             continue;
         };
 
@@ -301,13 +265,13 @@ pub fn execute_sort_with(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
 
-    fn rule(id: u32, contains: &str, folder: &str) -> Rule {
+    pub(crate) fn rule(id: u32, contains: &str, folder: &str) -> Rule {
         Rule {
             id,
             contains: contains.to_string(),
@@ -315,7 +279,17 @@ mod tests {
             target_folder: folder.to_string(),
             enabled: true,
             stop_on_match: false,
+            regex: false,
+            case_sensitive: false,
+            scope: crate::models::MatchScope::Name,
         }
+    }
+
+    /// Compile for the tests that drive `resolve_destination` directly.
+    fn compiled(rules: &[Rule]) -> Vec<CompiledRule> {
+        let (compiled, errors) = compile_rules(rules);
+        assert!(errors.is_empty(), "rules failed to compile: {errors:?}");
+        compiled
     }
 
     fn write_file(dir: &Path, name: &str) -> PathBuf {
@@ -326,95 +300,13 @@ mod tests {
         path
     }
 
-    // --- expression parsing -------------------------------------------------
-
-    #[test]
-    fn or_matches_either_term() {
-        assert!(expr_matches("receipt_2024.pdf", "invoice,receipt"));
-        assert!(expr_matches("invoice_2024.pdf", "invoice,receipt"));
-        assert!(!expr_matches("statement.pdf", "invoice,receipt"));
-    }
-
-    #[test]
-    fn and_requires_every_term() {
-        assert!(expr_matches("invoice_2024.pdf", "invoice*2024"));
-        assert!(!expr_matches("invoice_2023.pdf", "invoice*2024"));
-    }
-
-    #[test]
-    fn and_binds_tighter_than_or() {
-        // `invoice*2024,receipt` means (invoice AND 2024) OR receipt
-        let expr = "invoice*2024,receipt";
-        assert!(expr_matches("invoice_2024.pdf", expr));
-        assert!(expr_matches("receipt_2023.pdf", expr));
-        assert!(!expr_matches("invoice_2023.pdf", expr));
-    }
-
-    #[test]
-    fn terms_are_trimmed() {
-        assert!(expr_matches("invoice.pdf", " invoice , receipt "));
-        assert!(expr_matches("invoice_2024.pdf", " invoice * 2024 "));
-    }
-
-    /// Regression: an expression of bare operators used to match *everything*,
-    /// which swept every file in the tree into a folder.
-    #[test]
-    fn operator_only_expression_matches_nothing() {
-        for expr in ["", "   ", "*", ",", ",,", "*,*", " , * "] {
-            assert!(
-                !expr_matches("anything.txt", expr),
-                "expression {expr:?} should match nothing"
-            );
-            assert!(parse_expr(expr).is_empty(), "expression {expr:?} has no terms");
-        }
-        assert!(!parse_expr("invoice").is_empty());
-    }
-
-    // --- rule matching ------------------------------------------------------
-
-    #[test]
-    fn matching_is_case_insensitive() {
-        let r = rule(1, "INVOICE", "Invoices");
-        assert!(matches_rule("Invoice_2024.PDF", &r));
-    }
-
-    #[test]
-    fn contains_not_excludes() {
-        let mut r = rule(1, "invoice", "Invoices");
-        r.contains_not = Some("draft".to_string());
-        assert!(matches_rule("invoice_final.pdf", &r));
-        assert!(!matches_rule("invoice_draft.pdf", &r));
-    }
-
-    #[test]
-    fn empty_contains_not_does_not_exclude() {
-        for not in ["", "   ", "*"] {
-            let mut r = rule(1, "invoice", "Invoices");
-            r.contains_not = Some(not.to_string());
-            assert!(
-                matches_rule("invoice.pdf", &r),
-                "contains_not {not:?} should not exclude"
-            );
-        }
-    }
-
     #[test]
     fn operator_only_rule_matches_no_file() {
-        let r = rule(1, "*", "Everything");
-        assert!(!matches_rule("anything.txt", &r));
+        let rules = compiled(&[rule(1, "*", "Everything")]);
         assert_eq!(
-            resolve_destination(Path::new("/src/anything.txt"), &[r], None),
+            resolve_destination(Path::new("/src/anything.txt"), &rules, None),
             None
         );
-    }
-
-    // --- folder name fallback ----------------------------------------------
-
-    #[test]
-    fn folder_name_strips_operators() {
-        assert_eq!(sanitize_folder_name("invoice*2024"), "invoice 2024");
-        assert_eq!(sanitize_folder_name("invoice,receipt"), "invoice receipt");
-        assert_eq!(sanitize_folder_name("  spaced  "), "spaced");
     }
 
     // --- conflict resolution ------------------------------------------------
@@ -474,7 +366,7 @@ mod tests {
         let file = PathBuf::from("/src/clip_16x9_30s.mp4");
         let rules = vec![rule(1, "16x9", "16x9"), rule(2, "_30s", "30s")];
 
-        let (dest, ids) = resolve_destination(&file, &rules, None).unwrap();
+        let (dest, ids) = resolve_destination(&file, &compiled(&rules), None).unwrap();
         assert_eq!(
             dest,
             PathBuf::from("/src").join("16x9").join("30s").join("clip_16x9_30s.mp4")
@@ -490,7 +382,7 @@ mod tests {
         let out = PathBuf::from("/out");
         let rules = vec![rule(1, "16x9", "16x9"), rule(2, "_30s", "30s")];
 
-        let (dest, _) = resolve_destination(&file, &rules, Some(&out)).unwrap();
+        let (dest, _) = resolve_destination(&file, &compiled(&rules), Some(&out)).unwrap();
         assert_eq!(
             dest,
             out.join("16x9").join("30s").join("clip_16x9_30s.mp4"),
@@ -505,7 +397,7 @@ mod tests {
         first.stop_on_match = true;
         let rules = vec![first, rule(2, "_30s", "30s")];
 
-        let (dest, ids) = resolve_destination(&file, &rules, None).unwrap();
+        let (dest, ids) = resolve_destination(&file, &compiled(&rules), None).unwrap();
         assert_eq!(dest, PathBuf::from("/src").join("16x9").join("clip_16x9_30s.mp4"));
         assert_eq!(ids, vec![1]);
     }
@@ -517,7 +409,7 @@ mod tests {
         first.enabled = false;
         let rules = vec![first, rule(2, "_30s", "30s")];
 
-        let (dest, ids) = resolve_destination(&file, &rules, None).unwrap();
+        let (dest, ids) = resolve_destination(&file, &compiled(&rules), None).unwrap();
         assert_eq!(dest, PathBuf::from("/src").join("30s").join("clip_16x9_30s.mp4"));
         assert_eq!(ids, vec![2]);
     }
@@ -526,7 +418,7 @@ mod tests {
     fn unmatched_file_stays_put() {
         let file = PathBuf::from("/src/notes.txt");
         let rules = vec![rule(1, "16x9", "16x9")];
-        assert_eq!(resolve_destination(&file, &rules, None), None);
+        assert_eq!(resolve_destination(&file, &compiled(&rules), None), None);
     }
 
     #[test]
@@ -534,7 +426,7 @@ mod tests {
         let file = PathBuf::from("/src/invoice_2024.pdf");
         let rules = vec![rule(1, "invoice*2024", "")];
 
-        let (dest, _) = resolve_destination(&file, &rules, None).unwrap();
+        let (dest, _) = resolve_destination(&file, &compiled(&rules), None).unwrap();
         assert_eq!(
             dest,
             PathBuf::from("/src").join("invoice 2024").join("invoice_2024.pdf")
@@ -706,3 +598,4 @@ mod tests {
         assert!(out.join("Reports/report (1).txt").exists());
     }
 }
+

@@ -50,6 +50,7 @@ jobs:
         run: npm install
 
       - name: Build and release
+        id: tauri
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,3 +61,23 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # The bundler only emits installers. The binary it builds along the way is
+      # already self-contained (the frontend is embedded and WebView2Loader is
+      # linked statically), so publishing it as-is gives a no-install portable
+      # build for free. It still needs the WebView2 runtime, which ships with
+      # Windows 11 and reaches Windows 10 through Windows Update.
+      - name: Publish portable Windows executable
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $source = 'src-tauri/target/release/filesorter.exe'
+          if (-not (Test-Path $source)) {
+            throw "Portable build missing: $source was not produced by the bundler"
+          }
+          $portable = "FileSorter_${version}_x64_portable.exe"
+          Copy-Item $source $portable
+          gh release upload "v$version" $portable --clobber
